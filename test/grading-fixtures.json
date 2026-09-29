@@ -1,0 +1,873 @@
+{
+ "rawQuestions": [
+  {
+   "id": "q1",
+   "type": "single",
+   "text": " Μονάδα ταχύτητας; ",
+   "options": [
+    {
+     "id": "a",
+     "text": "km/h"
+    },
+    {
+     "id": "b",
+     "text": "knots"
+    },
+    {
+     "text": ""
+    }
+   ],
+   "correct": "b",
+   "points": "2"
+  },
+  {
+   "type": "multi",
+   "text": "Φανοί",
+   "options": [
+    "Κόκκινο",
+    "Πράσινο",
+    {
+     "text": "Μπλε"
+    }
+   ],
+   "correct": [
+    "a",
+    "c",
+    "zz"
+   ],
+   "points": 1.555
+  },
+  {
+   "id": "q3",
+   "type": "tf",
+   "text": "Πυξίδα",
+   "answer": "false"
+  },
+  {
+   "id": "q4",
+   "type": "short",
+   "text": "Λιμάνι",
+   "accept": "Πειραιάς | Piraeus;  "
+  },
+  {
+   "id": "q5",
+   "type": "short",
+   "text": "Αριθμός",
+   "accept": [
+    "3,5",
+    "  "
+   ],
+   "points": 0
+  },
+  {
+   "id": "q6",
+   "type": "weird",
+   "text": "Άγνωστος τύπος",
+   "options": [
+    {
+     "text": "x"
+    },
+    {
+     "text": "y"
+    }
+   ],
+   "correct": [
+    "b"
+   ],
+   "points": 500
+  },
+  {
+   "id": "q7",
+   "type": "single",
+   "text": "Πολλές σωστές σε single",
+   "options": [
+    {
+     "text": "1"
+    },
+    {
+     "text": "2"
+    }
+   ],
+   "correct": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "q8",
+   "type": "tf",
+   "text": "Χωρίς απάντηση"
+  }
+ ],
+ "questions": [
+  {
+   "id": "q1",
+   "type": "single",
+   "text": "Μονάδα ταχύτητας;",
+   "points": 2,
+   "options": [
+    {
+     "id": "a",
+     "text": "km/h"
+    },
+    {
+     "id": "b",
+     "text": "knots"
+    }
+   ],
+   "correct": [
+    "b"
+   ]
+  },
+  {
+   "id": "q2",
+   "type": "multi",
+   "text": "Φανοί",
+   "points": 1.56,
+   "options": [
+    {
+     "id": "a",
+     "text": "Κόκκινο"
+    },
+    {
+     "id": "b",
+     "text": "Πράσινο"
+    },
+    {
+     "id": "c",
+     "text": "Μπλε"
+    }
+   ],
+   "correct": [
+    "a",
+    "c"
+   ]
+  },
+  {
+   "id": "q3",
+   "type": "tf",
+   "text": "Πυξίδα",
+   "points": 1,
+   "answer": false
+  },
+  {
+   "id": "q4",
+   "type": "short",
+   "text": "Λιμάνι",
+   "points": 1,
+   "accept": [
+    "Πειραιάς",
+    "Piraeus"
+   ]
+  },
+  {
+   "id": "q5",
+   "type": "short",
+   "text": "Αριθμός",
+   "points": 1,
+   "accept": [
+    "3,5"
+   ]
+  },
+  {
+   "id": "q6",
+   "type": "single",
+   "text": "Άγνωστος τύπος",
+   "points": 100,
+   "options": [
+    {
+     "id": "a",
+     "text": "x"
+    },
+    {
+     "id": "b",
+     "text": "y"
+    }
+   ],
+   "correct": [
+    "b"
+   ]
+  },
+  {
+   "id": "q7",
+   "type": "single",
+   "text": "Πολλές σωστές σε single",
+   "points": 1,
+   "options": [
+    {
+     "id": "a",
+     "text": "1"
+    },
+    {
+     "id": "b",
+     "text": "2"
+    }
+   ],
+   "correct": [
+    "a"
+   ]
+  },
+  {
+   "id": "q8",
+   "type": "tf",
+   "text": "Χωρίς απάντηση",
+   "points": 1,
+   "answer": null
+  }
+ ],
+ "validate": [
+  "Ερώτηση 8: ορίστε αν η πρόταση είναι Σωστή ή Λάθος."
+ ],
+ "cases": [
+  {
+   "answers": {},
+   "clean": {},
+   "grade": {
+    "score": 0,
+    "max": 108.56,
+    "percent": 0,
+    "grade": 0,
+    "perQuestion": [
+     {
+      "id": "q1",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 2
+     },
+     {
+      "id": "q2",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1.56
+     },
+     {
+      "id": "q3",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q4",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q5",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q6",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 100
+     },
+     {
+      "id": "q7",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q8",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     }
+    ],
+    "answered": 0
+   }
+  },
+  {
+   "answers": {
+    "q1": "b",
+    "q2": [
+     "c",
+     "a"
+    ],
+    "q3": false,
+    "q4": " ΠΕΙΡΑΙΑΣ. ",
+    "q5": "3.5",
+    "q6": "b",
+    "q7": "a",
+    "q8": true
+   },
+   "clean": {
+    "q1": "b",
+    "q2": [
+     "c",
+     "a"
+    ],
+    "q3": false,
+    "q4": " ΠΕΙΡΑΙΑΣ. ",
+    "q5": "3.5",
+    "q6": "b",
+    "q7": "a",
+    "q8": true
+   },
+   "grade": {
+    "score": 107.56,
+    "max": 108.56,
+    "percent": 99.08,
+    "grade": 5,
+    "perQuestion": [
+     {
+      "id": "q1",
+      "answered": true,
+      "correct": true,
+      "points": 2,
+      "max": 2
+     },
+     {
+      "id": "q2",
+      "answered": true,
+      "correct": true,
+      "points": 1.56,
+      "max": 1.56
+     },
+     {
+      "id": "q3",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q4",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q5",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q6",
+      "answered": true,
+      "correct": true,
+      "points": 100,
+      "max": 100
+     },
+     {
+      "id": "q7",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q8",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     }
+    ],
+    "answered": 8
+   }
+  },
+  {
+   "answers": {
+    "q1": "a",
+    "q2": [
+     "a"
+    ],
+    "q3": "false",
+    "q4": "piraeus",
+    "q5": " 3,50 ",
+    "q6": "c",
+    "q7": [
+     "a"
+    ],
+    "bogus": 1
+   },
+   "clean": {
+    "q1": "a",
+    "q2": [
+     "a"
+    ],
+    "q4": "piraeus",
+    "q5": " 3,50 ",
+    "q7": "a"
+   },
+   "grade": {
+    "score": 3,
+    "max": 108.56,
+    "percent": 2.76,
+    "grade": 0,
+    "perQuestion": [
+     {
+      "id": "q1",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 2
+     },
+     {
+      "id": "q2",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1.56
+     },
+     {
+      "id": "q3",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q4",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q5",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q6",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 100
+     },
+     {
+      "id": "q7",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q8",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     }
+    ],
+    "answered": 5
+   }
+  },
+  {
+   "answers": {
+    "q1": [
+     "b"
+    ],
+    "q2": "a",
+    "q3": true,
+    "q4": "Πειραιας!",
+    "q5": "τρία",
+    "q6": null,
+    "q7": ""
+   },
+   "clean": {
+    "q1": "b",
+    "q2": [
+     "a"
+    ],
+    "q3": true,
+    "q4": "Πειραιας!",
+    "q5": "τρία"
+   },
+   "grade": {
+    "score": 3,
+    "max": 108.56,
+    "percent": 2.76,
+    "grade": 0,
+    "perQuestion": [
+     {
+      "id": "q1",
+      "answered": true,
+      "correct": true,
+      "points": 2,
+      "max": 2
+     },
+     {
+      "id": "q2",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1.56
+     },
+     {
+      "id": "q3",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q4",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q5",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q6",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 100
+     },
+     {
+      "id": "q7",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q8",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     }
+    ],
+    "answered": 5
+   }
+  },
+  {
+   "answers": {
+    "q2": [
+     "a",
+     "c",
+     "a"
+    ],
+    "q4": "ΠΕΙΡΑΙΆΣ",
+    "q5": "-3.5",
+    "q1": 2
+   },
+   "clean": {
+    "q2": [
+     "a",
+     "c"
+    ],
+    "q4": "ΠΕΙΡΑΙΆΣ",
+    "q5": "-3.5"
+   },
+   "grade": {
+    "score": 2.56,
+    "max": 108.56,
+    "percent": 2.36,
+    "grade": 0,
+    "perQuestion": [
+     {
+      "id": "q1",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 2
+     },
+     {
+      "id": "q2",
+      "answered": true,
+      "correct": true,
+      "points": 1.56,
+      "max": 1.56
+     },
+     {
+      "id": "q3",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q4",
+      "answered": true,
+      "correct": true,
+      "points": 1,
+      "max": 1
+     },
+     {
+      "id": "q5",
+      "answered": true,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q6",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 100
+     },
+     {
+      "id": "q7",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     },
+     {
+      "id": "q8",
+      "answered": false,
+      "correct": false,
+      "points": 0,
+      "max": 1
+     }
+    ],
+    "answered": 3
+   }
+  }
+ ],
+ "norm": [
+  [
+   "  Ναυσιπλοΐα  ",
+   "ναυσιπλοια"
+  ],
+  [
+   "ΟΔΟΣ",
+   "οδοσ"
+  ],
+  [
+   "Café.",
+   "cafe"
+  ],
+  [
+   "άέήίόύώ ΐΰ",
+   "αεηιουω ιυ"
+  ],
+  [
+   "a\tb\n c",
+   "a b c"
+  ],
+  [
+   "Αγγλικά!!",
+   "αγγλικα"
+  ]
+ ],
+ "percent": [
+  [
+   0,
+   0
+  ],
+  [
+   49.99,
+   0
+  ],
+  [
+   49.9999999,
+   1
+  ],
+  [
+   50,
+   1
+  ],
+  [
+   59.99,
+   1
+  ],
+  [
+   60,
+   2
+  ],
+  [
+   75,
+   3
+  ],
+  [
+   89.99,
+   4
+  ],
+  [
+   90,
+   5
+  ],
+  [
+   100,
+   5
+  ]
+ ],
+ "phase": [
+  [
+   0,
+   "open"
+  ],
+  [
+   59999,
+   "open"
+  ],
+  [
+   60000,
+   "open"
+  ],
+  [
+   60001,
+   "open"
+  ],
+  [
+   600000,
+   "open"
+  ],
+  [
+   900000,
+   "open"
+  ],
+  [
+   900001,
+   "closed"
+  ]
+ ],
+ "student": [
+  {
+   "id": "q3",
+   "type": "tf",
+   "text": "Πυξίδα",
+   "points": 1
+  },
+  {
+   "id": "q1",
+   "type": "single",
+   "text": "Μονάδα ταχύτητας;",
+   "points": 2,
+   "options": [
+    {
+     "id": "b",
+     "text": "knots"
+    },
+    {
+     "id": "a",
+     "text": "km/h"
+    }
+   ]
+  },
+  {
+   "id": "q2",
+   "type": "multi",
+   "text": "Φανοί",
+   "points": 1.56,
+   "options": [
+    {
+     "id": "a",
+     "text": "Κόκκινο"
+    },
+    {
+     "id": "b",
+     "text": "Πράσινο"
+    },
+    {
+     "id": "c",
+     "text": "Μπλε"
+    }
+   ]
+  },
+  {
+   "id": "q4",
+   "type": "short",
+   "text": "Λιμάνι",
+   "points": 1
+  },
+  {
+   "id": "q5",
+   "type": "short",
+   "text": "Αριθμός",
+   "points": 1
+  },
+  {
+   "id": "q6",
+   "type": "single",
+   "text": "Άγνωστος τύπος",
+   "points": 100,
+   "options": [
+    {
+     "id": "a",
+     "text": "x"
+    },
+    {
+     "id": "b",
+     "text": "y"
+    }
+   ]
+  },
+  {
+   "id": "q7",
+   "type": "single",
+   "text": "Πολλές σωστές σε single",
+   "points": 1,
+   "options": [
+    {
+     "id": "a",
+     "text": "1"
+    },
+    {
+     "id": "b",
+     "text": "2"
+    }
+   ]
+  },
+  {
+   "id": "q8",
+   "type": "tf",
+   "text": "Χωρίς απάντηση",
+   "points": 1
+  }
+ ],
+ "texts": [
+  {
+   "correct": "Β",
+   "answer": "Β"
+  },
+  {
+   "correct": "Α, Γ",
+   "answer": "Γ, Α"
+  },
+  {
+   "correct": "Λάθος",
+   "answer": "Λάθος"
+  },
+  {
+   "correct": "Πειραιάς | Piraeus",
+   "answer": " ΠΕΙΡΑΙΑΣ. "
+  },
+  {
+   "correct": "3,5",
+   "answer": "3.5"
+  },
+  {
+   "correct": "Β",
+   "answer": "Β"
+  },
+  {
+   "correct": "Α",
+   "answer": "Α"
+  },
+  {
+   "correct": "",
+   "answer": "Σωστό"
+  }
+ ]
+}

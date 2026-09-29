@@ -1,0 +1,55 @@
+/* v2.2 — grades (see CONTRACT-v2.2.md): 0Δ / 0Α codes, re-exam, periods in the gradebook and the export page */
+
+/* ---------------------------------------------------------------- gradebook toolbar */
+.toolbar .select.gb-period { min-width: 150px; }
+.seg.gb-mode button.on[data-v="reexam"] { color: var(--danger); }
+
+/* period of a student (next to the class) */
+.badge-per { background: #e9f1ea; color: #2d6a3e; font-weight: 600; }
+.badge-per.none { background: #f3f4f6; color: var(--faint); font-weight: 500; font-style: italic; }
+
+/* ---------------------------------------------------------------- codes 0Δ / 0Α: failing, like 0 and ΑΠ */
+.gb td.g.att input { color: var(--danger); font-size: 12px; letter-spacing: 0.2px; }
+.gb td.g.att.carried input { color: #2f6db3; }
+
+/* ---------------------------------------------------------------- normal mode: a grade with a re-exam grade */
+.gb td.g.has-re { position: relative; }
+.gb td.g.has-re input { padding-right: 18px; }
+.re-badge {
+  display: inline-block; font-size: 9.5px; font-weight: 700; line-height: 14px; padding: 0 4px; border-radius: 4px;
+  letter-spacing: 0.2px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none;
+}
+.re-badge.ok { background: var(--success-soft); color: var(--success); box-shadow: inset 0 0 0 1px #bfe3cd; }
+.re-badge.bad { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px #f0c9c9; }
+.gb td.g .re-badge { position: absolute; top: 3px; right: 3px; }
+.re-badge-inline { vertical-align: 1px; }
+
+/* ---------------------------------------------------------------- re-exam mode */
+.gb-re-count { color: var(--danger); font-weight: 650; }
+.gb.gb-re td.g.re-edit { position: relative; background: #fffaf2; box-shadow: inset 0 0 0 1px #f3e2c4; }
+.gb.gb-re td.g.re-edit .re-orig {
+  position: absolute; top: 2px; left: 4px; font-size: 10px; font-weight: 650; color: var(--faint);
+  line-height: 12px; pointer-events: none; font-variant-numeric: tabular-nums;
+}
+.gb.gb-re td.g.re-edit input { color: var(--text); padding-top: 6px; }
+.gb.gb-re td.g.re-edit input::placeholder { color: #d9c9a8; }
+.gb.gb-re td.g.re-edit.re-pass { background: #f1faf4; box-shadow: inset 0 0 0 1px #cfe9d9; }
+.gb.gb-re td.g.re-edit.re-pass input { color: var(--success); }
+.gb.gb-re td.g.re-edit.fail input { color: var(--danger); }
+.gb.gb-re tr:hover td.g.re-edit { background: #fff4e3; }
+.gb.gb-re tr:hover td.g.re-edit.re-pass { background: #e8f6ed; }
+.gb.gb-re td.g.ro { color: var(--muted); font-weight: 600; font-size: 13px; height: 34px; font-variant-numeric: tabular-nums; }
+.gb.gb-re td.g.ro.fail { color: var(--danger); }
+.gb.gb-re td.g.ro.carried { background: #eef6ff; color: #2f6db3; font-style: italic; }
+
+/* legend of the codes under the table */
+.legend.gb-codes { margin-top: 6px; }
+.legend.gb-codes b { color: var(--text-2); }
+
+/* ---------------------------------------------------------------- export page */
+@media (min-width: 1251px) { .grid.ex-grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 1250px) { .grid.ex-grid-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.chip.ex-re-chip b { color: var(--danger); }
+
+/* gradebook toolbar: the search box gives way first, so the buttons stay on the same line */
+.toolbar .input-search.gb-search { width: auto; flex: 1 1 115px; min-width: 110px; max-width: 220px; }

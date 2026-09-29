@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' http: https: ws://127.0.0.1:* ws://localhost:*; frame-src 'self' blob:; object-src blob:;" />
+  <title>GMC Maritime Academy Student Registry</title>
+  <link rel="icon" href="icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="css/grades.css" />
+  <link rel="stylesheet" href="css/periods.css" />
+  <link rel="stylesheet" href="css/teachers.css" />
+</head>
+<body class="mode-loading">
+  <div id="login-root" class="login-root"></div>
+  <div id="student-root" class="student-root"></div>
+  <div id="teacher-root" class="teacher-root"></div>
+  <div id="loading-root" class="loading-root"><div class="spinner"></div><div>Φόρτωση…</div></div>
+  <div id="app" class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" width="40" height="40">
+            <circle cx="24" cy="24" r="23" fill="#13365c" stroke="#c9a54a" stroke-width="2" />
+            <g fill="none" stroke="#f3e2b3" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="24" cy="12.5" r="3.2" />
+              <path d="M24 15.7 V36.5" />
+              <path d="M17.5 20.5 H30.5" />
+              <path d="M12.5 27.5 C13.5 33.5 18.5 36.8 24 36.8 C29.5 36.8 34.5 33.5 35.5 27.5" />
+              <path d="M10.3 29.6 L12.5 27.2 L15.1 29.2" />
+              <path d="M37.7 29.6 L35.5 27.2 L32.9 29.2" />
+            </g>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-name">GMC Maritime Academy</div>
+          <div class="brand-sub">Student Registry</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-titles">
+          <h1 id="page-title">Αρχική</h1>
+          <div id="page-sub" class="page-sub"></div>
+        </div>
+        <div class="topbar-right">
+          <div class="year-switch" title="Το ακαδημαϊκό έτος εργασίας — ισχύει σε όλες τις σελίδες">
+            <span class="year-switch-label">Ακαδημαϊκό έτος</span>
+            <select id="year-select" data-on-change="switchYear"></select>
+          </div>
+          <div id="save-status" class="save-status" title="Αυτόματη αποθήκευση"></div>
+          <div id="user-chip" class="user-chip"></div>
+        </div>
+      </header>
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/exceljs.min.js"></script>
+  <script src="js/neutralino.js"></script>
+  <script src="platform-neu.js"></script>
+  <script src="remote.js"></script>
+  <script src="core.js"></script>
+  <script src="exam-core.js"></script>
+  <script src="excel.js"></script>
+  <script src="ui.js"></script>
+  <script src="p-students.js"></script>
+  <script src="p-subjects.js"></script>
+  <script src="p-gradebook.js"></script>
+  <script src="p-import.js"></script>
+  <script src="p-export.js"></script>
+  <script src="p-transfer.js"></script>
+  <script src="p-login.js"></script>
+  <script src="p-accounts.js"></script>
+  <script src="p-exams.js"></script>
+  <script src="p-student.js"></script>
+  <script src="p-teacher.js"></script>
+  <script src="pdf-view.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

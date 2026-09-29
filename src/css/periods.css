@@ -1,0 +1,33 @@
+/* v2.2 — periods (see CONTRACT-v2.2.md) */
+
+/* period tag (Οκτ / Ιαν / Μάι) — students list, import preview, transfer preview, student card */
+.badge-period { background: #e3f3ef; color: #17695c; }
+.badge-period.none { background: var(--warning-soft); color: var(--warning); }
+.per-cell { white-space: nowrap; }
+
+/* dashboard level card: «Οκτ 45 · Ιαν 30» */
+.level-card .lc-periods { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -4px 0 10px; font-size: 12px; color: var(--muted); }
+.level-card .lc-per { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: #e3f3ef; color: #17695c; font-weight: 600; }
+.level-card .lc-per b { font-variant-numeric: tabular-nums; font-weight: 700; }
+.level-card .lc-per.none { background: var(--warning-soft); color: var(--warning); }
+.level-card .lc-sep { color: var(--faint); }
+
+/* settings: «Περίοδοι» card */
+#periods-card .per-table .input { height: 32px; }
+#periods-card .per-table td:first-child { width: 48%; }
+#periods-card .per-short { max-width: 110px; }
+#periods-card .per-add .input:first-child { flex: 1; min-width: 0; max-width: 260px; }
+#periods-card .per-matrix-wrap { border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#periods-card .per-matrix th.center, #periods-card .per-matrix td.center { width: 64px; }
+#periods-card .per-matrix .checkbox { justify-content: center; }
+#periods-card .per-matrix tbody tr:last-child td { border-bottom: 0; }
+
+/* student card: enrollments per year (level / class / period) */
+.en-table .select { min-width: 0; }
+
+/* grade import preview: the grade already has a re-exam grade */
+.reexam-note { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 650; line-height: 1.6; background: #efe8fb; color: #5b3a9a; white-space: nowrap; vertical-align: 1px; }
+
+/* conflict dialog: records changed on both sides */
+.merge-conflicts { margin: 8px 0 10px; padding: 8px 10px 8px 26px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12.5px; max-height: 180px; overflow: auto; }
+.merge-conflicts li { margin: 2px 0; }

@@ -1,0 +1,65 @@
+{
+  "name": "gmc-student-registry",
+  "version": "2.2.0",
+  "description": "GMC Maritime Academy Student Registry",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/core.test.js && node test/server.test.js && cd server && go test ./...",
+    "e2e": "xvfb-run -a node test/e2e.js && xvfb-run -a node test/e2e-exam.js",
+    "server": "cd server && go run . --data ../.server-data"
+  },
+  "keywords": [],
+  "author": "GMC Maritime Academy",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "1.56",
+    "exceljs": "^4.4.0",
+    "xlsx": "^0.18.5"
+  },
+  "productName": "GMC Maritime Academy Student Registry",
+  "private": true,
+  "build": {
+    "appId": "gr.gmc.maritime.registry",
+    "productName": "GMC Maritime Academy Student Registry",
+    "copyright": "GMC Maritime Academy",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName} ${version} ${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GMC Student Registry",
+      "artifactName": "GMC-Student-Registry-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "language": "1032",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "GMC-Student-Registry-Portable-${version}.${ext}"
+    },
+    "asar": true,
+    "publish": null
+  }
+}

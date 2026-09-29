@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+test/.bin/
+test/shots/
+test/shots-neu/
+server/gmcserver
+.server-data/
+*.exe
