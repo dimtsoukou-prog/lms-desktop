@@ -1209,23 +1209,30 @@ t('calendar: class keys, names and classes of a year', () => {
   assert.deepStrictEqual(C.calendarSubjects(db, y, 'SUP||M1|OCT').map((s) => s.code), ['NAV', 'ENG']);
 });
 
-t('absences: limit = ⌊days × % / 100⌋, setting validation', () => {
-  assert.strictEqual(C.absenceLimit(20, 30), 6);
-  assert.strictEqual(C.absenceLimit(22, 30), 6);
-  assert.strictEqual(C.absenceLimit(7, 30), 2);
-  assert.strictEqual(C.absenceLimit(3, 100), 3);
-  assert.strictEqual(C.absenceLimit(10, 0), 0);
-  assert.strictEqual(C.absenceLimit(0, 30), null, 'no days → no limit');
+t('absences: hours per day, limit in hours per subject (set by the admin)', () => {
   const db = C.createEmptyDb(new Date(2026, 8, 25));
-  assert.strictEqual(C.absenceLimitPct(db), 30);
-  assert.strictEqual(C.setAbsenceLimitPct(db, ' 25% '), 25);
-  assert.strictEqual(C.absenceLimitPct(db), 25);
-  ['', 'x', 101, -1, 2.5, '12,5', null].forEach((v) => assert.throws(() => C.setAbsenceLimitPct(db, v), /ακέραιος από 0 έως 100/, 'reject ' + v));
-  assert.strictEqual(db.settings.absenceLimitPct, 25);
-  db.settings.absenceLimitPct = '40'; // not a number → default
-  assert.strictEqual(C.absenceLimitPct(db), 30);
-  db.settings.absenceLimitPct = 12.5;
-  assert.strictEqual(C.absenceLimitPct(db), 30);
+  assert.strictEqual(C.hoursPerDay(db), 4);
+  assert.strictEqual(C.setHoursPerDay(db, ' 5 '), 5);
+  assert.strictEqual(C.hoursPerDay(db), 5);
+  ['', 'x', 0, 13, 2.5, null].forEach((v) => assert.throws(() => C.setHoursPerDay(db, v), /από 1 έως 12/, 'reject ' + v));
+  db.settings.hoursPerDay = '6'; // not a number → default
+  assert.strictEqual(C.hoursPerDay(db), 4);
+  assert.strictEqual(C.parseAbsenceLimit(''), null);
+  assert.strictEqual(C.parseAbsenceLimit(' 12 '), 12);
+  assert.strictEqual(C.parseAbsenceLimit(0), 0);
+  ['x', -1, 2.5, '1,5'].forEach((v) => assert.throws(() => C.parseAbsenceLimit(v), /αριθμός ωρών/, 'reject ' + v));
+  const s = C.createSubject(db, { levelId: 'SUP', code: 'A', name: 'Α', absenceLimit: '10' });
+  assert.strictEqual(s.absenceLimit, 10);
+  assert.strictEqual(C.subjectAbsenceLimit(s), 10);
+  C.updateSubject(db, s.id, { absenceLimit: '' });
+  assert.ok(!('absenceLimit' in s) && C.subjectAbsenceLimit(s) === null, 'empty = no limit');
+  C.updateSubject(db, s.id, { absenceLimit: 0 });
+  assert.strictEqual(C.subjectAbsenceLimit(s), 0);
+  C.updateSubject(db, s.id, { name: 'Β' }); // not given → kept
+  assert.strictEqual(C.subjectAbsenceLimit(s), 0);
+  assert.strictEqual(C.subjectAbsenceLimit({ absenceLimit: '6' }), null);
+  assert.strictEqual(C.subjectAbsenceLimit({ absenceLimit: 1.5 }), null);
+  assert.strictEqual(C.createSubject(db, { levelId: 'SUP', name: 'Γ' }).absenceLimit, undefined);
 });
 
 t('calendar: one subject per day, fill a range, keep / overwrite, academic year bounds', () => {
@@ -1260,89 +1267,93 @@ t('calendar: one subject per day, fill a range, keep / overwrite, academic year 
   assert.throws(() => C.planFill(db, y, 'OLA|DECK|MO|OCT', { from: '2026-10-05', to: '2026-10-06', subjectId: nav.id }), /δεν ανήκει σε αυτό το τμήμα/);
 });
 
-t('absences: subject of the day, limit per class calendar, moves with the calendar', () => {
+t('absences: one per hour, subject of the day, limit of the subject, moves with the calendar', () => {
   const { db, y, a, b, c, nav, eng, S1 } = attendanceDb();
+  C.updateSubject(db, nav.id, { absenceLimit: 6 });
   C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-30', subjectId: nav.id }); // 20 weekdays
-  C.fillCalendar(db, y, 'SUP||M2|OCT', { from: '2026-10-05', to: '2026-10-09', subjectId: nav.id }); // another class: 5 days
-  assert.strictEqual(C.subjectDays(db, y, S1, nav.id), 20);
-  assert.throws(() => C.setAbsence(db, a.id, y, '2026-10-10', true), /δεν έχει μάθημα στις 10\/10\/2026/);
-  const days = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-12'];
-  days.forEach((dt) => C.setAbsence(db, a.id, y, dt, true, { by: 'admin' }));
+  C.fillCalendar(db, y, 'SUP||M2|OCT', { from: '2026-10-05', to: '2026-10-09', subjectId: nav.id });
+  assert.throws(() => C.setAbsence(db, a.id, y, '2026-10-10', 1, true), /δεν έχει μάθημα στις 10\/10\/2026/);
+  assert.throws(() => C.setAbsence(db, a.id, y, '2026-10-05', 5, true), /Μη έγκυρη ώρα «5» \(1–4\)/);
+  assert.throws(() => C.setAbsence(db, a.id, y, '2026-10-05', 0, true), /Μη έγκυρη ώρα/);
+  C.setDayAbsences(db, a.id, y, '2026-10-05', [1, 2, 3, 4], { by: 'admin' }); // the whole day
+  C.setAbsence(db, a.id, y, '2026-10-06', 2, true);
+  C.setAbsence(db, a.id, y, '2026-10-06', 2, true); // twice → one record
+  assert.deepStrictEqual(C.absenceHours(db, a.id, y, '2026-10-05'), [1, 2, 3, 4]);
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-06', 2).subjectId, nav.id);
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-06', 2).src, 'admin');
+  C.setAbsence(db, a.id, y, '2026-10-07', 3, true);
   let s = C.absenceStatus(db, a, nav.id, y);
-  assert.deepStrictEqual([s.count, s.days, s.limit, s.over, s.left, s.pct], [6, 20, 6, false, 0, 30], 'at the limit: still allowed');
-  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-05').subjectId, nav.id);
-  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-05').src, 'admin');
-  C.setAbsence(db, a.id, y, '2026-10-05', true); // twice → one record
-  assert.strictEqual(db.absences.filter((x) => x.studentId === a.id).length, 6);
-  C.setAbsence(db, a.id, y, '2026-10-13', true);
+  assert.deepStrictEqual([s.count, s.limit, s.over, s.left, s.days, s.hours], [6, 6, false, 0, 20, 80], 'at the limit: still allowed');
+  assert.deepStrictEqual(s.dates, ['2026-10-05', '2026-10-06', '2026-10-07']);
+  assert.deepStrictEqual(C.absenceEntriesText(s.entries), ['05/10/2026 (1η, 2η, 3η, 4η ώρα)', '06/10/2026 (2η ώρα)', '07/10/2026 (3η ώρα)']);
+  C.setAbsence(db, a.id, y, '2026-10-07', 4, true);
   s = C.absenceStatus(db, a, nav.id, y);
-  assert.deepStrictEqual([s.count, s.limit, s.over, s.left], [7, 6, true, -1], 'over the limit');
-  assert.deepStrictEqual(s.dates, days.concat(['2026-10-13']));
-  // another class has its own limit: 5 days → 1
-  C.setAbsence(db, c.id, y, '2026-10-05', true);
-  C.setAbsence(db, c.id, y, '2026-10-06', true);
+  assert.deepStrictEqual([s.count, s.over, s.left], [7, true, -1], 'one hour over the limit');
+  // setDayAbsences sets exactly those hours
+  assert.strictEqual(C.setDayAbsences(db, a.id, y, '2026-10-05', [2, 4]), 2);
+  assert.deepStrictEqual(C.absenceHours(db, a.id, y, '2026-10-05'), [2, 4]);
+  assert.strictEqual(C.absenceStatus(db, a, nav.id, y).count, 5);
+  // the limit belongs to the subject: another class, same limit; no limit → never over
+  ['2026-10-05', '2026-10-06'].forEach((d) => C.setDayAbsences(db, c.id, y, d, [1, 2, 3, 4]));
   s = C.absenceStatus(db, c, nav.id, y);
-  assert.deepStrictEqual([s.count, s.days, s.limit, s.over], [2, 5, 1, true]);
-  // a subject without days in the class calendar: no limit, never over
+  assert.deepStrictEqual([s.count, s.days, s.limit, s.over], [8, 5, 6, true]);
+  C.updateSubject(db, nav.id, { absenceLimit: '' });
+  assert.deepStrictEqual([C.absenceStatus(db, c, nav.id, y).limit, C.absenceStatus(db, c, nav.id, y).over], [null, false]);
+  C.updateSubject(db, nav.id, { absenceLimit: 6 });
   s = C.absenceStatus(db, b, eng.id, y);
   assert.deepStrictEqual([s.count, s.days, s.limit, s.over], [0, 0, null, false]);
-  // the day turns out to be English: the absences of the class that day move with it
-  C.setAbsence(db, b.id, y, '2026-10-13', true);
+  // the day turns out to be English: every hour of the class's absences that day moves with it
+  C.setDayAbsences(db, a.id, y, '2026-10-13', [1, 2]);
+  C.setAbsence(db, b.id, y, '2026-10-13', 3, true);
   let r = C.setCalendarDay(db, y, S1, '2026-10-13', eng.id);
-  assert.deepStrictEqual(r, { changed: true, moved: 2, removed: 0 });
-  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-13').subjectId, eng.id);
-  assert.strictEqual(C.absenceStatus(db, a, nav.id, y).count, 6);
-  assert.strictEqual(C.absenceStatus(db, c, nav.id, y).count, 2, 'other classes untouched');
-  // no lesson that day after all: its absences go
+  assert.deepStrictEqual(r, { changed: true, moved: 3, removed: 0 });
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-13', 2).subjectId, eng.id);
+  assert.strictEqual(C.absenceStatus(db, a, eng.id, y).count, 2);
+  assert.strictEqual(C.absenceStatus(db, c, nav.id, y).count, 8, 'other classes untouched');
   r = C.setCalendarDay(db, y, S1, '2026-10-13', null);
-  assert.deepStrictEqual(r, { changed: true, moved: 0, removed: 2 });
-  assert.strictEqual(C.getAbsence(db, b.id, y, '2026-10-13'), null);
-  C.setAbsence(db, a.id, y, '2026-10-12', false);
-  assert.strictEqual(C.absenceStatus(db, a, nav.id, y).count, 5);
-  // the % comes from the settings
-  C.setAbsenceLimitPct(db, 20);
-  s = C.absenceStatus(db, a, nav.id, y);
-  assert.deepStrictEqual([s.days, s.limit, s.over], [19, 3, true]);
+  assert.deepStrictEqual(r, { changed: true, moved: 0, removed: 3 });
+  assert.deepStrictEqual(C.absenceHours(db, b.id, y, '2026-10-13'), []);
 });
 
 t('absences: class summary, dates of a subject, copy of a calendar', () => {
   const { db, y, a, b, nav, eng, S1 } = attendanceDb();
-  C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-16', subjectId: nav.id }); // 10 days → limit 3
-  C.fillCalendar(db, y, S1, { from: '2026-10-19', to: '2026-10-20', subjectId: eng.id }); // 2 days → limit 0
-  ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'].forEach((dt) => C.setAbsence(db, a.id, y, dt, true));
-  C.setAbsence(db, b.id, y, '2026-10-19', true);
+  C.updateSubject(db, nav.id, { absenceLimit: 3 });
+  C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-16', subjectId: nav.id });
+  C.fillCalendar(db, y, S1, { from: '2026-10-19', to: '2026-10-20', subjectId: eng.id }); // ENG: no limit
+  C.setDayAbsences(db, a.id, y, '2026-10-05', [1, 2, 3]);
+  C.setAbsence(db, a.id, y, '2026-10-06', 1, true);
+  C.setAbsence(db, b.id, y, '2026-10-19', 4, true);
   const sum = C.absenceSummary(db, y, S1);
-  assert.deepStrictEqual(sum.subjects.map((x) => [x.subject.code, x.days, x.limit]), [['NAV', 10, 3], ['ENG', 2, 0]]);
+  assert.strictEqual(sum.hpd, 4);
+  assert.deepStrictEqual(sum.subjects.map((x) => [x.subject.code, x.days, x.limit]), [['NAV', 10, 3], ['ENG', 2, null]]);
   assert.deepStrictEqual(sum.rows.map((r) => [r.student.am, r.cells.map((c) => c.count + (c.over ? '!' : '')), r.total, r.over]), [
     ['201', ['4!', '0'], 4, true],
-    ['202', ['0', '1!'], 1, true],
+    ['202', ['0', '1'], 1, false],
   ]);
   const dd = C.subjectDates(db, y, eng.id, [a, b]);
   assert.deepStrictEqual(dd.map((x) => [x.date, x.students.map((s) => s.am)]), [['2026-10-19', ['201', '202']], ['2026-10-20', ['201', '202']]]);
-  // copy to Morning 2 (same level): all days; absences are not copied
   let r = C.copyCalendar(db, y, S1, 'SUP||M2|OCT', false);
   assert.strictEqual(r.set, 12);
   assert.strictEqual(C.subjectDays(db, y, 'SUP||M2|OCT', nav.id), 10);
   assert.strictEqual(C.absenceSummary(db, y, 'SUP||M2|OCT').rows[0].total, 0);
-  // to a class of another level: its subjects do not apply → skipped
   r = C.copyCalendar(db, y, S1, 'OLA|DECK|MO|OCT', false);
   assert.deepStrictEqual([r.set, r.skipped], [0, 12]);
   assert.throws(() => C.copyCalendar(db, y, S1, S1), /άλλο τμήμα/);
 });
 
-t('absences: merge, normalize, deletes', () => {
+t('absences: merge, normalize (day absences → every hour), deletes', () => {
   const { db, y, a, b, nav, eng, S1 } = attendanceDb();
   C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-09', subjectId: nav.id });
   const base = JSON.parse(JSON.stringify(db));
   const mine = JSON.parse(JSON.stringify(db));
   const theirs = JSON.parse(JSON.stringify(db));
   C.setCalendarDay(mine, y, S1, '2026-10-12', eng.id); // the admin adds a day
-  C.setAbsence(theirs, a.id, y, '2026-10-05', true, { by: 'teacher1', src: 'teacher' }); // a teacher marks an absence
+  C.setAbsence(mine, a.id, y, '2026-10-05', 1, true, { by: 'admin' }); // the secretariat: 1st hour
+  C.setAbsence(theirs, a.id, y, '2026-10-05', 2, true, { by: 'teacher1', src: 'teacher' }); // a teacher: 2nd hour
   let m = C.mergeRegistry(base, mine, theirs);
   assert.deepStrictEqual(m.conflicts, []);
   assert.strictEqual(m.merged.calendar.length, 6);
-  assert.strictEqual(m.merged.absences.length, 1);
-  assert.strictEqual(m.merged.absences[0].by, 'teacher1');
+  assert.deepStrictEqual(m.merged.absences.map((x) => [x.hour, x.by]).sort(), [[1, 'admin'], [2, 'teacher1']]);
   // both change the same day of the calendar → conflict on "yearId|cls|date"
   const mine2 = JSON.parse(JSON.stringify(db));
   const theirs2 = JSON.parse(JSON.stringify(db));
@@ -1350,23 +1361,27 @@ t('absences: merge, normalize, deletes', () => {
   C.setCalendarDay(theirs2, y, S1, '2026-10-05', null);
   m = C.mergeRegistry(base, mine2, theirs2);
   assert.deepStrictEqual(m.conflicts, [{ collection: 'calendar', key: y + '|' + S1 + '|2026-10-05' }]);
-  // the secretariat and a teacher record the same absence → no conflict (the admin's record is kept)
+  // the same hour recorded on both sides → no conflict (the admin's record is kept)
   const mine3 = JSON.parse(JSON.stringify(db));
   const theirs3 = JSON.parse(JSON.stringify(db));
-  C.setAbsence(mine3, b.id, y, '2026-10-06', true, { by: 'admin' });
-  C.setAbsence(theirs3, b.id, y, '2026-10-06', true, { by: 'teacher1', src: 'teacher' });
+  C.setAbsence(mine3, b.id, y, '2026-10-06', 3, true, { by: 'admin' });
+  C.setAbsence(theirs3, b.id, y, '2026-10-06', 3, true, { by: 'teacher1', src: 'teacher' });
   m = C.mergeRegistry(base, mine3, theirs3);
   assert.deepStrictEqual(m.conflicts, []);
-  assert.deepStrictEqual(m.merged.absences.map((x) => [x.studentId, x.by]), [[b.id, 'admin']]);
-  // an older registry gets the collections
+  assert.deepStrictEqual(m.merged.absences.map((x) => [x.studentId, x.hour, x.by]), [[b.id, 3, 'admin']]);
+  // an older registry: no collections; absences of a whole day (no hour) → every hour of the day
   const old = JSON.parse(JSON.stringify(db));
   delete old.calendar;
   delete old.absences;
-  const n = C.normalizeDb(old);
-  assert.deepStrictEqual([n.calendar, n.absences], [[], []]);
+  assert.deepStrictEqual([C.normalizeDb(old).calendar, old.absences], [[], []]);
+  const dayOld = JSON.parse(JSON.stringify(db));
+  dayOld.absences = [{ studentId: a.id, yearId: y, date: '2026-10-07', subjectId: nav.id, by: 'x', src: 'teacher' }];
+  C.normalizeDb(dayOld);
+  assert.deepStrictEqual(dayOld.absences.map((x) => [x.date, x.hour, x.by]), [1, 2, 3, 4].map((h) => ['2026-10-07', h, 'x']));
+  assert.strictEqual(C.absenceStatus(dayOld, a, nav.id, y).count, 4);
   // deletes: a student's absences, a subject's days + absences, a year's calendar
-  C.setAbsence(db, a.id, y, '2026-10-05', true);
-  C.setAbsence(db, b.id, y, '2026-10-06', true);
+  C.setAbsence(db, a.id, y, '2026-10-05', 1, true);
+  C.setAbsence(db, b.id, y, '2026-10-06', 2, true);
   assert.deepStrictEqual(C.subjectAttendanceUsage(db, nav.id), { days: 5, absences: 2 });
   C.deleteStudent(db, a.id);
   assert.deepStrictEqual(db.absences.map((x) => x.studentId), [b.id]);

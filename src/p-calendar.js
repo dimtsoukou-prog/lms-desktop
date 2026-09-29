@@ -1,10 +1,10 @@
 /*
  * Calendar & absences (admin): the teaching calendar of each class (τμήμα) — one subject per day — and the
- * students' absences. Click a day: its subject and who was absent. «Συμπλήρωση» puts a subject on a range of
- * days (e.g. every weekday for two weeks), «Αντιγραφή» copies another class's calendar. «Απουσίες» sums them
- * up per student and subject against the limit (settings.absenceLimitPct % of the subject's days, rounded
- * down): above it a student cannot start the subject's exams unless the admin allows it (Exams → results).
- * Teachers record the absences of their own subjects from their portal; both land in the same registry.
+ * students' absences per hour (settings.hoursPerDay toggles a day). Click a day: its subject and the hours each
+ * student was absent. «Συμπλήρωση» puts a subject on a range of days (e.g. every weekday for two weeks),
+ * «Αντιγραφή» copies another class's calendar. «Απουσίες» sums the hours up per student and subject against
+ * the subject's limit (set in «Μαθήματα»): above it a student cannot start the subject's exams unless the admin
+ * allows it (Exams → results). Teachers record the hours of their own subjects from their portal.
  */
 (function () {
   'use strict';
@@ -93,8 +93,11 @@
     const col = colours(subjects);
     const byId = new Map(db.subjects.map((s) => [s.id, s]));
     const ids = new Set(c.students.map((s) => s.id));
-    const perDay = new Map(); // date → absences of the class's students
-    A.abs.byDay.forEach((a) => ids.has(a.studentId) && perDay.set(a.date, (perDay.get(a.date) || 0) + 1));
+    const perDay = new Map(); // date → hours of absence of the class's students
+    A.abs.byDay.forEach((hours, k) => {
+      const i = k.lastIndexOf('|');
+      if (ids.has(k.slice(0, i))) perDay.set(k.slice(i + 1), (perDay.get(k.slice(i + 1)) || 0) + hours.length);
+    });
     const range = C.yearDateRange(db, yearId);
     const t = today();
     const [yy, mm] = Z.month.split('-').map(Number);
@@ -124,7 +127,7 @@
       h += '<button class="' + cls + (sj ? ' has' : '') + '" data-action="calDay" data-date="' + d + '" title="' + esc(longDate(d) + (sj ? ' — ' + C.subjectLabel(sj) : '')) + '">' +
         '<span class="cal-dnum">' + Number(d.slice(8, 10)) + '</span>' +
         (sj ? '<span class="cal-subj cs-' + (col.has(sid) ? col.get(sid) : 0) + '">' + esc(subjectShort(sj)) + '</span>' : sid ? '<span class="cal-subj cs-x">?</span>' : '') +
-        (absent ? '<span class="cal-abs">' + plural(absent, 'απουσία', 'απουσίες') + '</span>' : '') + '</button>';
+        (absent ? '<span class="cal-abs">' + plural(absent, 'ώρα απουσίας', 'ώρες απουσίας') + '</span>' : '') + '</button>';
     });
     return h + '</div></div>';
   }
@@ -136,19 +139,19 @@
     const subjects = C.calendarSubjects(db, yearId, c.key);
     const col = colours(subjects);
     let total = 0;
-    let h = '<div class="card cal-legend"><div class="card-head"><div><h3>Μαθήματα του τμήματος</h3><div class="sub">Ημέρες στο ημερολόγιο · όριο απουσιών ' + A.pct + '%</div></div></div><div class="cal-leg-list">';
+    let h = '<div class="card cal-legend"><div class="card-head"><div><h3>Μαθήματα του τμήματος</h3><div class="sub">Ημέρες στο ημερολόγιο · όριο απουσιών σε ώρες</div></div></div><div class="cal-leg-list">';
     subjects.forEach((s) => {
       const days = A.cal.days.get(c.key + '|' + s.id) || 0;
       total += days;
-      const limit = C.absenceLimit(days, A.pct);
+      const limit = C.subjectAbsenceLimit(s);
       const over = limit === null ? 0 : c.students.filter((st) => (A.abs.bySubject.get(st.id + '|' + s.id) || []).length > limit).length;
       h += '<div class="cal-leg' + (days ? '' : ' none') + '"><span class="cal-sw cs-' + col.get(s.id) + '"></span><div class="cal-leg-main"><div class="cal-leg-name" title="' + esc(C.subjectLabel(s)) + '">' + esc(C.subjectLabel(s)) + '</div>' +
-        '<div class="cal-leg-meta">' + (days ? plural(days, 'ημέρα', 'ημέρες') + ' · έως <b>' + limit + '</b> απουσί' + (limit === 1 ? 'α' : 'ες') : 'χωρίς ημέρες') + '</div></div>' +
+        '<div class="cal-leg-meta">' + (days ? plural(days, 'ημέρα', 'ημέρες') : 'χωρίς ημέρες') + ' · ' + (limit === null ? '<span class="warning-text">χωρίς όριο</span>' : 'όριο <b>' + plural(limit, 'ώρα', 'ώρες') + '</b>') + '</div></div>' +
         (over ? '<button class="cal-over" data-action="calView" data-v="summary" title="Σπουδαστές πάνω από το όριο">' + over + ' εκτός ορίου</button>' : '') + '</div>';
     });
     if (!subjects.length) h += '<div class="card-body small muted">Το επίπεδο δεν έχει μαθήματα για αυτό το τμήμα — προσθέστε τα στη σελίδα «Μαθήματα».</div>';
-    h += '</div><div class="card-body cal-leg-foot small muted">Σύνολο: <b>' + plural(total, 'ημέρα', 'ημέρες') + '</b> με μάθημα. Όριο κάθε μαθήματος: ' + A.pct + '% των ημερών του, στρογγυλεμένο προς τα κάτω (π.χ. 20 ημέρες → 6). ' +
-      'Με περισσότερες απουσίες ο σπουδαστής δεν ξεκινά τις εξετάσεις του μαθήματος. <button class="link" data-action="go" data-page="settings">Αλλαγή ποσοστού</button></div></div>';
+    h += '</div><div class="card-body cal-leg-foot small muted">Σύνολο: <b>' + plural(total, 'ημέρα', 'ημέρες') + '</b> με μάθημα, ' + plural(A.hpd, 'ώρα', 'ώρες') + ' η καθεμία. ' +
+      'Με περισσότερες ώρες απουσίας από το όριο ο σπουδαστής δεν ξεκινά τις εξετάσεις του μαθήματος. Το όριο ορίζεται σε κάθε μάθημα: <button class="link" data-action="go" data-page="subjects">Μαθήματα</button></div></div>';
     return h;
   }
 
@@ -158,24 +161,24 @@
     const sum = C.absenceSummary(db, yearId, c.key);
     if (!sum.subjects.length) return '<div class="card">' + emptyState('calendar', 'Δεν υπάρχει ακόμη ημερολόγιο', 'Ορίστε πρώτα τις ημέρες κάθε μαθήματος του τμήματος (καρτέλα «Ημερολόγιο») — από αυτές βγαίνει το όριο απουσιών.', '<button class="btn btn-primary" data-action="calView" data-v="month">' + icon('calendar') + 'Ημερολόγιο</button>') + '</div>';
     const over = sum.rows.filter((r) => r.over).length;
-    let h = '<div class="card"><div class="card-head"><div><h3>Απουσίες ανά μάθημα</h3><div class="sub">' + plural(sum.rows.length, 'σπουδαστής', 'σπουδαστές') + ' · όριο ' + sum.pct + '% των ημερών κάθε μαθήματος' +
+    let h = '<div class="card"><div class="card-head"><div><h3>Ώρες απουσίας ανά μάθημα</h3><div class="sub">' + plural(sum.rows.length, 'σπουδαστής', 'σπουδαστές') + ' · όριο κάθε μαθήματος σε ώρες (Μαθήματα)' +
       (over ? ' · <span class="danger-text strong">' + plural(over, 'σπουδαστής', 'σπουδαστές') + ' εκτός ορίου</span>' : '') + '</div></div></div>';
     h += '<div class="table-wrap abs-wrap"><table class="table table-compact abs-table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th>' +
-      sum.subjects.map((x) => '<th class="num" title="' + esc(C.subjectLabel(x.subject)) + '"><div>' + esc(subjectShort(x.subject)) + '</div><div class="abs-th-sub">' + (x.days ? x.days + ' ημ. · όριο ' + x.limit : 'χωρίς ημέρες') + '</div></th>').join('') +
+      sum.subjects.map((x) => '<th class="num" title="' + esc(C.subjectLabel(x.subject)) + '"><div>' + esc(subjectShort(x.subject)) + '</div><div class="abs-th-sub">' + x.days + ' ημ. · ' + (x.limit === null ? 'χωρίς όριο' : 'όριο ' + x.limit + ' ώρ.') + '</div></th>').join('') +
       '<th class="num">Σύνολο</th></tr></thead><tbody>';
     sum.rows.forEach((r) => {
       h += '<tr' + (r.over ? ' class="abs-over-row"' : '') + '><td class="am">' + esc(r.student.am) + '</td><td class="strong nowrap">' + esc(C.studentName(r.student)) + (r.withdrawn ? ' <span class="badge">αποχώρησε</span>' : '') + '</td>' +
         r.cells.map((cell, i) => {
           const x = sum.subjects[i];
           const at = !cell.over && x.limit !== null && cell.count === x.limit && cell.count > 0;
-          const tip = cell.dates.length ? cell.dates.map(C.dateText).join(', ') : '';
+          const tip = C.absenceEntriesText(cell.entries).join(' · ');
           return '<td class="num"><button class="abs-cell' + (cell.over ? ' over' : at ? ' at' : '') + (cell.count ? '' : ' zero') + '" data-action="calAbsList" data-sid="' + esc(r.student.id) + '" data-subject="' + esc(x.subject.id) + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + (cell.count ? '' : ' disabled') + '>' +
             cell.count + (x.limit !== null ? '<span class="abs-of">/' + x.limit + '</span>' : '') + '</button></td>';
         }).join('') +
         '<td class="num strong">' + r.total + '</td></tr>';
     });
-    h += '</tbody></table></div><div class="card-body small muted abs-foot">Κόκκινο: πάνω από το όριο — ο σπουδαστής <b>δεν μπορεί να ξεκινήσει</b> τις εξετάσεις του μαθήματος (βλέπει μήνυμα στην οθόνη του). Πορτοκαλί: ακριβώς στο όριο. ' +
-      'Άδεια συμμετοχής δίνεται χειροκίνητα ανά εξέταση: Εξετάσεις → Αποτελέσματα ή Ανάθεση. Κλικ σε έναν αριθμό: οι ημερομηνίες των απουσιών.</div></div>';
+    h += '</tbody></table></div><div class="card-body small muted abs-foot">Ώρες απουσίας. Κόκκινο: πάνω από το όριο — ο σπουδαστής <b>δεν μπορεί να ξεκινήσει</b> τις εξετάσεις του μαθήματος (βλέπει μήνυμα στην οθόνη του). Πορτοκαλί: ακριβώς στο όριο. ' +
+      'Άδεια συμμετοχής δίνεται χειροκίνητα ανά εξέταση: Εξετάσεις → Αποτελέσματα ή Ανάθεση. Κλικ σε έναν αριθμό: οι ημέρες και οι ώρες.</div></div>';
     return h;
   }
 
@@ -215,7 +218,15 @@
     App.render();
   };
 
-  // ------------------------------------------------------------ one day: its subject and who was absent
+  // ------------------------------------------------------------ one day: its subject and each student's hours of absence
+  /** Toggle buttons of the hours of a day (1…hpd); `on` = the hours absent. */
+  function hourToggles(sid, hpd, on, attr) {
+    let h = '<div class="hr-tog" role="group">';
+    for (let i = 1; i <= hpd; i++)
+      h += '<button type="button" class="hr' + (on.has(i) ? ' on' : '') + '" ' + attr + '="' + esc(sid) + '" data-h="' + i + '" aria-pressed="' + on.has(i) + '" title="' + i + 'η ώρα: ' + (on.has(i) ? 'απών' : 'παρών') + '">' + i + '</button>';
+    return h + '<button type="button" class="hr hr-all" ' + attr + '="' + esc(sid) + '" data-h="all" title="Απών όλη την ημέρα / παρών">όλες</button></div>';
+  }
+
   App.actions.calDay = (el) => {
     const { db, yearId } = S();
     const c = current();
@@ -224,65 +235,82 @@
     const day = C.calendarDay(db, yearId, c.key, date);
     const subjects = C.calendarSubjects(db, yearId, c.key);
     const A = C.attendance(db, yearId);
-    const absent = new Set(c.students.filter((st) => A.abs.byDay.has(st.id + '|' + date)).map((st) => st.id));
-    const before = absent.size;
-    const initial = Array.from(absent).sort().join(',');
+    const hpd = A.hpd;
+    // studentId → hours absent that day
+    const abs = new Map(c.students.map((st) => [st.id, new Set(A.abs.byDay.get(st.id + '|' + date) || [])]));
+    const snap = () => c.students.map((st) => st.id + ':' + Array.from(abs.get(st.id)).sort().join('.')).join(',');
+    const initial = snap();
+    const hoursNow = () => c.students.reduce((n, st) => n + abs.get(st.id).size, 0);
+    const before = hoursNow();
     let sid = day ? day.subjectId : '';
     const opts = '<option value="">— Χωρίς μάθημα —</option>' + subjects.map((s) => '<option value="' + esc(s.id) + '">' + esc(C.subjectLabel(s)) + '</option>').join('');
     function roster() {
-      if (!sid) return '<div class="callout" style="margin-top:14px">' + icon('info') + '<p>Χωρίς μάθημα την ημέρα αυτή δεν καταχωρίζονται απουσίες.' + (before ? ' <b>Θα διαγραφούν ' + plural(before, 'απουσία', 'απουσίες') + ' που υπάρχουν.</b>' : '') + '</p></div>';
+      if (!sid) return '<div class="callout" style="margin-top:14px">' + icon('info') + '<p>Χωρίς μάθημα την ημέρα αυτή δεν καταχωρίζονται απουσίες.' + (before ? ' <b>Θα διαγραφούν ' + plural(before, 'ώρα απουσίας', 'ώρες απουσίας') + ' που υπάρχουν.</b>' : '') + '</p></div>';
       if (!c.students.length) return '<p class="muted small" style="margin-top:14px">Το τμήμα δεν έχει σπουδαστές.</p>';
       const sj = db.subjects.find((s) => s.id === sid);
-      let h = '<div class="row" style="margin:14px 0 8px"><div class="label">Απόντες</div><span class="small muted" id="cd-count">' + absent.size + ' / ' + c.students.length + '</span><div class="spacer"></div><button class="btn btn-sm btn-ghost" id="cd-none">Κανένας απών</button></div>' +
-        '<div class="table-wrap cd-wrap"><table class="table table-compact"><thead><tr><th class="chk"></th><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th class="num" title="Απουσίες στο μάθημα / όριο">' + esc(subjectShort(sj)) + ': απουσίες</th></tr></thead><tbody>';
+      let h = '<div class="row" style="margin:14px 0 8px"><div class="label">Ώρες απουσίας</div><span class="small muted" id="cd-count"></span><div class="spacer"></div><button class="btn btn-sm btn-ghost" id="cd-none">Όλοι παρόντες</button></div>' +
+        '<div class="table-wrap cd-wrap"><table class="table table-compact"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Ώρες (κλικ = απών)</th><th class="num" title="Ώρες απουσίας στο μάθημα / όριο">' + esc(subjectShort(sj)) + ': σύνολο</th></tr></thead><tbody>';
       c.students.forEach((st) => {
         const s = C.absenceStatus(db, st, sid, yearId, A);
-        const had = A.abs.byDay.has(st.id + '|' + date) && (A.abs.byDay.get(st.id + '|' + date).subjectId === sid);
-        const n = s.count - (had ? 1 : 0);
-        h += '<tr><td class="chk"><input type="checkbox" data-cd="' + esc(st.id) + '"' + (absent.has(st.id) ? ' checked' : '') + ' /></td><td class="am">' + esc(st.am) + '</td><td class="strong">' + esc(C.studentName(st)) + '</td>' +
-          '<td class="num small" data-cd-n="' + esc(st.id) + '" data-base="' + n + '" data-limit="' + (s.limit === null ? '' : s.limit) + '"></td></tr>';
+        const base = s.count - s.entries.filter((e) => e.date === date).length;
+        h += '<tr><td class="am">' + esc(st.am) + '</td><td class="strong">' + esc(C.studentName(st)) + '</td><td>' + hourToggles(st.id, hpd, abs.get(st.id), 'data-cd') + '</td>' +
+          '<td class="num small nowrap" data-cd-n="' + esc(st.id) + '" data-base="' + base + '" data-limit="' + (s.limit === null ? '' : s.limit) + '"></td></tr>';
       });
       return h + '</tbody></table></div>';
     }
-    function paintCounts(ctx) {
+    function paint(ctx) {
+      ctx.qa('button[data-cd]').forEach((b) => {
+        const set = abs.get(b.dataset.cd);
+        const on = b.dataset.h === 'all' ? set.size === hpd : set.has(Number(b.dataset.h));
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+      });
       ctx.qa('[data-cd-n]').forEach((td) => {
-        const n = Number(td.dataset.base) + (absent.has(td.dataset.cdN) ? 1 : 0);
+        const n = Number(td.dataset.base) + abs.get(td.dataset.cdN).size;
         const lim = td.dataset.limit === '' ? null : Number(td.dataset.limit);
         td.innerHTML = n + (lim === null ? '' : ' / ' + lim) + (lim !== null && n > lim ? ' <span class="badge badge-danger">εκτός ορίου</span>' : '');
       });
       const k = ctx.q('#cd-count');
-      if (k) k.textContent = absent.size + ' / ' + c.students.length;
+      if (k) {
+        const who = c.students.filter((st) => abs.get(st.id).size).length;
+        k.textContent = who ? plural(who, 'σπουδαστής', 'σπουδαστές') + ' · ' + plural(hoursNow(), 'ώρα', 'ώρες') : 'κανείς απών';
+      }
     }
     openModal({
       title: longDate(date),
-      sub: esc(c.name),
-      size: 'md',
+      sub: esc(c.name) + ' · ' + plural(hpd, 'ώρα', 'ώρες'),
+      size: 'lg',
       body: '<div class="field"><label>Μάθημα της ημέρας</label><select class="select" id="cd-subject">' + opts + '</select></div><div id="cd-roster"></div>',
       onMount(ctx) {
         const sel = ctx.q('#cd-subject');
         sel.value = sid;
-        const paint = () => {
+        const show = () => {
           ctx.q('#cd-roster').innerHTML = roster();
-          paintCounts(ctx);
-          const none = ctx.q('#cd-none');
-          if (none)
-            none.addEventListener('click', () => {
-              absent.clear();
-              ctx.qa('[data-cd]').forEach((x) => (x.checked = false));
-              paintCounts(ctx);
-            });
+          paint(ctx);
         };
-        paint();
+        show();
         sel.addEventListener('change', () => {
           sid = sel.value;
-          paint();
+          show();
         });
-        ctx.el.addEventListener('change', (e) => {
-          const id = e.target.dataset && e.target.dataset.cd;
-          if (!id) return;
-          if (e.target.checked) absent.add(id);
-          else absent.delete(id);
-          paintCounts(ctx);
+        ctx.el.addEventListener('click', (e) => {
+          if (e.target.closest('#cd-none')) {
+            abs.forEach((set) => set.clear());
+            return paint(ctx);
+          }
+          const b = e.target.closest('button[data-cd]');
+          if (!b) return;
+          const set = abs.get(b.dataset.cd);
+          if (b.dataset.h === 'all') {
+            const full = set.size === hpd;
+            set.clear();
+            if (!full) for (let i = 1; i <= hpd; i++) set.add(i);
+          } else {
+            const h = Number(b.dataset.h);
+            if (set.has(h)) set.delete(h);
+            else set.add(h);
+          }
+          paint(ctx);
         });
       },
       buttons: [
@@ -292,12 +320,13 @@
           cls: 'btn-primary',
           id: 'cd-save',
           onClick: () => {
-            if (sid === (day ? day.subjectId : '') && (!sid || Array.from(absent).sort().join(',') === initial)) return; // nothing changed
+            if (sid === (day ? day.subjectId : '') && (!sid || snap() === initial)) return; // nothing changed
             App.mutate((d) => {
               C.setCalendarDay(d, yearId, c.key, date, sid || null);
-              if (sid) c.students.forEach((st) => C.setAbsence(d, st.id, yearId, date, absent.has(st.id), { by: me(), src: 'admin' }));
+              if (sid) c.students.forEach((st) => C.setDayAbsences(d, st.id, yearId, date, Array.from(abs.get(st.id)), { by: me(), src: 'admin' }));
             });
-            toast(sid ? longDate(date) + ': <b>' + esc(C.subjectLabel(db.subjects.find((s) => s.id === sid))) + '</b> · ' + plural(absent.size, 'απών', 'απόντες') : longDate(date) + ': χωρίς μάθημα');
+            const who = sid ? c.students.filter((st) => abs.get(st.id).size).length : 0;
+            toast(sid ? longDate(date) + ': <b>' + esc(C.subjectLabel(db.subjects.find((s) => s.id === sid))) + '</b> · ' + (who ? plural(who, 'απών', 'απόντες') + ', ' + plural(hoursNow(), 'ώρα', 'ώρες') : 'κανείς απών') : longDate(date) + ': χωρίς μάθημα');
           },
         },
       ],
@@ -370,11 +399,11 @@
             const o = ctx.read();
             const p = C.planFill(db, yearId, c.key, o);
             if (!p.change) throw new Error('Καμία ημέρα δεν αλλάζει στο διάστημα αυτό.');
-            const lost = p.dates.reduce((n, d) => n + c.students.filter((st) => C.getAbsence(db, st.id, yearId, d)).length, 0);
-            if (!o.subjectId && lost && !(await confirmDialog('Καθαρισμός ημερών', 'Στις ημέρες αυτές υπάρχουν <b>' + plural(lost, 'απουσία', 'απουσίες') + '</b> — θα διαγραφούν.', { okText: 'Καθαρισμός', danger: true }))) return false;
+            const lost = p.dates.reduce((n, d) => n + c.students.reduce((m, st) => m + C.absenceHours(db, st.id, yearId, d).length, 0), 0);
+            if (!o.subjectId && lost && !(await confirmDialog('Καθαρισμός ημερών', 'Στις ημέρες αυτές υπάρχουν <b>' + plural(lost, 'ώρα απουσίας', 'ώρες απουσίας') + '</b> — θα διαγραφούν.', { okText: 'Καθαρισμός', danger: true }))) return false;
             Z.month = monthOf(o.from);
             const r = App.mutate((d) => C.fillCalendar(d, yearId, c.key, o));
-            toast(o.subjectId ? plural(r.set, 'ημέρα', 'ημέρες') + ' με <b>' + esc(C.subjectLabel(db.subjects.find((s) => s.id === o.subjectId))) + '</b>' + (r.moved ? ' · ' + plural(r.moved, 'απουσία μεταφέρθηκε', 'απουσίες μεταφέρθηκαν') + ' στο νέο μάθημα' : '') : plural(r.set, 'ημέρα καθαρίστηκε', 'ημέρες καθαρίστηκαν') + (r.removed ? ' · ' + plural(r.removed, 'απουσία διαγράφηκε', 'απουσίες διαγράφηκαν') : ''));
+            toast(o.subjectId ? plural(r.set, 'ημέρα', 'ημέρες') + ' με <b>' + esc(C.subjectLabel(db.subjects.find((s) => s.id === o.subjectId))) + '</b>' + (r.moved ? ' · ' + plural(r.moved, 'ώρα απουσίας μεταφέρθηκε', 'ώρες απουσίας μεταφέρθηκαν') + ' στο νέο μάθημα' : '') : plural(r.set, 'ημέρα καθαρίστηκε', 'ημέρες καθαρίστηκαν') + (r.removed ? ' · ' + plural(r.removed, 'ώρα απουσίας διαγράφηκε', 'ώρες απουσίας διαγράφηκαν') : ''));
           },
         },
       ],
@@ -419,7 +448,7 @@
     });
   };
 
-  // ------------------------------------------------------------ the absences of one student in one subject
+  // ------------------------------------------------------------ the hours of absence of one student in one subject
   App.actions.calAbsList = (el) => {
     const { db, yearId } = S();
     const st = db.students.find((s) => s.id === el.dataset.sid);
@@ -427,16 +456,16 @@
     if (!st || !sj) return;
     const body = () => {
       const s = C.absenceStatus(S().db, st, sj.id, yearId);
-      if (!s.dates.length) return '<p class="muted">Δεν υπάρχουν απουσίες.</p>';
-      return '<div class="row" style="margin-bottom:10px"><span class="' + (s.over ? 'danger-text strong' : '') + '">' + plural(s.count, 'απουσία', 'απουσίες') + (s.limit !== null ? ' · όριο ' + s.limit + ' (' + s.days + ' ημέρες × ' + s.pct + '%)' : '') + '</span>' + (s.over ? '<span class="badge badge-danger">εκτός ορίου</span>' : '') + '</div>' +
-        '<table class="table table-compact"><tbody>' + s.dates.map((d) => {
-          const a = C.getAbsence(S().db, st.id, yearId, d);
-          return '<tr><td class="nowrap">' + esc(longDate(d)) + '</td><td class="small muted">' + esc(a && a.src === 'teacher' ? 'καθηγητής ' + (a.by || '') : 'γραμματεία' + (a && a.by ? ' (' + a.by + ')' : '')) + '</td><td class="right"><button class="btn btn-sm btn-ghost" data-al-del="' + d + '">' + icon('trash') + 'Διαγραφή</button></td></tr>';
+      if (!s.entries.length) return '<p class="muted">Δεν υπάρχουν απουσίες.</p>';
+      return '<div class="row" style="margin-bottom:10px"><span class="' + (s.over ? 'danger-text strong' : '') + '">' + plural(s.count, 'ώρα απουσίας', 'ώρες απουσίας') + (s.limit !== null ? ' · όριο ' + plural(s.limit, 'ώρα', 'ώρες') : ' · χωρίς όριο') + '</span>' + (s.over ? '<span class="badge badge-danger">εκτός ορίου</span>' : '') + '</div>' +
+        '<table class="table table-compact"><tbody>' + s.entries.map((e) => {
+          const a = C.getAbsence(S().db, st.id, yearId, e.date, e.hour);
+          return '<tr><td class="nowrap">' + esc(longDate(e.date)) + '</td><td class="nowrap strong">' + e.hour + 'η ώρα</td><td class="small muted">' + esc(a && a.src === 'teacher' ? 'καθηγητής ' + (a.by || '') : 'γραμματεία' + (a && a.by ? ' (' + a.by + ')' : '')) + '</td><td class="right"><button class="btn btn-sm btn-ghost" data-al-del="' + e.date + '" data-al-h="' + e.hour + '">' + icon('trash') + 'Διαγραφή</button></td></tr>';
         }).join('') + '</tbody></table>';
     };
     openModal({
       title: C.studentName(st) + ' — ' + C.subjectLabel(sj),
-      sub: 'Α.Μ. ' + esc(st.am) + ' · απουσίες ' + esc(C.yearLabel(db, yearId)),
+      sub: 'Α.Μ. ' + esc(st.am) + ' · ώρες απουσίας ' + esc(C.yearLabel(db, yearId)),
       size: 'md',
       body: body(),
       onMount(ctx) {
@@ -444,8 +473,9 @@
           const b = e.target.closest('[data-al-del]');
           if (!b) return;
           const d = b.dataset.alDel;
-          if (!(await confirmDialog('Διαγραφή απουσίας', 'Να διαγραφεί η απουσία της ' + esc(longDate(d)) + ';', { okText: 'Διαγραφή', danger: true }))) return;
-          App.mutate((db2) => C.setAbsence(db2, st.id, yearId, d, false));
+          const h = Number(b.dataset.alH);
+          if (!(await confirmDialog('Διαγραφή απουσίας', 'Να διαγραφεί η απουσία της ' + h + 'ης ώρας, ' + esc(longDate(d)) + ';', { okText: 'Διαγραφή', danger: true }))) return;
+          App.mutate((db2) => C.setAbsence(db2, st.id, yearId, d, h, false));
           ctx.setBody(body());
         });
       },

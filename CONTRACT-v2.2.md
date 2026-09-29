@@ -95,38 +95,39 @@ Teachers write grades straight into the registry while the admin works. When the
 the client 3-way-merges (`Core.mergeRegistry(base, mine, theirs)`) and saves again; the conflict dialog
 appears only when the same record was changed on both sides.
 
-## 7. Calendar & absences (ημερολόγιο τμήματος, απουσίες, όριο)
+## 7. Calendar & absences (ημερολόγιο τμήματος, απουσίες ανά ώρα, όριο ανά μάθημα)
 
 Registry collections (both optional in older registries — `normalizeDb` adds them):
 
 ```json
 "calendar": [{"yearId", "cls", "date": "YYYY-MM-DD", "subjectId"}],
-"absences": [{"studentId", "yearId", "date": "YYYY-MM-DD", "subjectId", "by", "at", "src": "admin"|"teacher"}]
+"absences": [{"studentId", "yearId", "date": "YYYY-MM-DD", "hour": 1…, "subjectId", "by", "at", "src": "admin"|"teacher"}]
 ```
 
 - **One subject per day per class.** `cls` = `levelId|spec|section|period` (`''` for a missing part):
   Support has no specialty (Deck & Engine together), Management has no section (the year's shift is the whole class's),
   `period` is the enrollment's period as stored. A student's class = his enrollment of that year (`Core.studentCalendarKey`).
-- **One absence per student per day**, for the subject his class has that day. Changing a day's subject moves the
-  absences of that day (of the class's students) to the new subject; clearing the day deletes them.
-- **Limit** of a subject = `⌊days × pct / 100⌋`, `days` = the subject's days in the student's class calendar,
-  `pct` = `settings.absenceLimitPct` (integer 0–100, default **30**). Every absence counts (no justified/unjustified split).
-  A subject with no days has no limit. **More** absences than the limit = over the limit (20 days, 30% → 6 allowed, 7 = over).
-- Merge keys: calendar `yearId|cls|date`, absences `studentId|yearId|date` (the same absence added on both sides is not a conflict).
+- **Absences per hour.** A day has `settings.hoursPerDay` hours (integer 1–12, default **4**); one record per student, day and hour,
+  for the subject his class has that day. A record without a valid `hour` (integer ≥ 1) is not counted; `normalizeDb` turns an older
+  whole-day record (no `hour`) into one record per hour of the day. Changing a day's subject moves that day's records of the class's
+  students to the new subject; clearing the day deletes them.
+- **Limit per subject, in hours:** `subject.absenceLimit` (integer ≥ 0), set by the admin (Μαθήματα); missing / anything else = no limit.
+  More hours of absence in the subject (that year, all classes) than the limit = over the limit.
+- Merge keys: calendar `yearId|cls|date`, absences `studentId|yearId|date|hour` (the same hour added on both sides is not a conflict).
 - Cascades: deleting a student / subject / year deletes its absences (and a subject's / year's calendar days).
 
 Server (`server/attendance.go`, the twin of the Core functions; `test/attendance-fixtures.json` keeps both identical):
 
 | Method & path | Who | What |
 |---|---|---|
-| `POST /api/teacher/absences` | teacher | `{yearId, subjectId, date, changes:[{studentId, absent}]}` → `{rev, stats:{added, removed, same}}`. The subject must be his (any assignment of that year), the student in his classes, the student's class must have that subject that day, the date not after tomorrow. No change → no new revision. |
+| `POST /api/teacher/absences` | teacher | `{yearId, subjectId, date, changes:[{studentId, hour, absent}]}` → `{rev, stats:{added, removed, same}}`. The subject must be his (any assignment of that year), the student in his classes, the student's class must have that subject that day, `hour` 1…hoursPerDay, the date not after tomorrow. No change → no new revision. |
 | `POST /api/exams/{id}/absence-allow` | admin | `{am, allowed}` → `{absenceAllowed:{am:{by, at}}}` — the student may take **this** exam although over the limit. |
 
 - Exam file: `absenceAllowed: {am: {by, at}}` (kept only for students still assigned; a duplicated exam starts without it).
-- An exam with `subjectId` and `yearId` is checked: `GET /api/my/exams` gives a not-started exam `barred: true, absences, absenceLimit`
+- An exam with `subjectId` and `yearId` is checked: `GET /api/my/exams` gives a not-started exam `barred: true, absences (hours), absenceLimit`
   when the student is over the limit and not allowed; `POST /api/my/exams/{id}/start` then answers **403**
   `{error, state: "barred", code: "absences", absences, absenceLimit}` (English text with `X-Lang: en`). A started attempt is never stopped.
-- `GET /api/exams/{id}/results`: `exam.absenceCheck`; rows get `absences, absenceDays, absenceLimit (null = no limit), overLimit, absenceAllowed`.
+- `GET /api/exams/{id}/results`: `exam.absenceCheck`; rows get `absences (hours), absenceDays, absenceLimit (null = no limit), overLimit, absenceAllowed`.
   `GET /api/exams/{id}` includes `absenceAllowed`.
 - Teacher view (`GET /api/teacher/data`): `calendar` = the days of his subjects in his students' classes, `absences` = his students'
-  absences in his subjects, `settings.absenceLimitPct`.
+  absences in his subjects, `settings.hoursPerDay`; his subjects carry `absenceLimit`.

@@ -114,8 +114,8 @@
   /** Too many absences in the exam's subject (and no permission from the Registrar's office): the exam cannot be started. */
   function barredHtml(e) {
     const n = Number(e.absences) || 0;
-    return '<div class="ec-barred">' + icon('alert') + '<div><b>You are not allowed to take this exam because of your absences.</b><br>You have ' + plural(n, 'absence', 'absences') + ' in this subject' +
-      (e.absenceLimit !== null && e.absenceLimit !== undefined ? ' and the limit is ' + e.absenceLimit : '') + '. Please contact the Registrar’s office.</div></div>';
+    return '<div class="ec-barred">' + icon('alert') + '<div><b>You are not allowed to take this exam because of your absences.</b><br>You have ' + plural(n, 'hour', 'hours') + ' of absence in this subject' +
+      (e.absenceLimit !== null && e.absenceLimit !== undefined ? ' and the limit is ' + plural(Number(e.absenceLimit), 'hour', 'hours') : '') + '. Please contact the Registrar’s office.</div></div>';
   }
 
   function card(e) {

@@ -174,10 +174,10 @@
       h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" style="align-items:center">' + icon('key') + '<p style="flex:1">' + plural(noAcc.length, 'σπουδαστής δεν έχει', 'σπουδαστές δεν έχουν') + ' λογαριασμό σύνδεσης και δεν θα μπορεί' + (noAcc.length === 1 ? '' : 'ούν') + ' να γράψ' + (noAcc.length === 1 ? 'ει' : 'ουν') + ' την εξέταση.</p><button class="btn btn-sm" data-action="exMakeAccounts">' + icon('key') + 'Δημιουργία λογαριασμών</button></div></div>';
     }
     if (over.length)
-      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" id="ex-over-note">' + icon('alert') + '<p>' + plural(over.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες απουσίες από το όριο στο μάθημα και <b>δεν θα μπορ' + (over.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (over.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση — θα δ' + (over.length === 1 ? 'ει' : 'ουν') + ' μήνυμα στην οθόνη τ' + (over.length === 1 ? 'ου' : 'ους') + '. Με «Να γράψει» δίνετε άδεια' + (d.id ? '' : ' (μετά την αποθήκευση της εξέτασης)') + '.</p></div></div>';
+      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" id="ex-over-note">' + icon('alert') + '<p>' + plural(over.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες ώρες απουσίας από το όριο στο μάθημα και <b>δεν θα μπορ' + (over.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (over.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση — θα δ' + (over.length === 1 ? 'ει' : 'ουν') + ' μήνυμα στην οθόνη τ' + (over.length === 1 ? 'ου' : 'ους') + '. Με «Να γράψει» δίνετε άδεια' + (d.id ? '' : ' (μετά την αποθήκευση της εξέτασης)') + '.</p></div></div>';
     if (!d.assignments.length) return h + '<div class="card-body muted small">Δεν έχουν επιλεγεί σπουδαστές.</div></div>';
     const withAbs = !!(d.subjectId && S().db.subjects.some((s) => s.id === d.subjectId));
-    h += '<div class="table-wrap" style="max-height:340px"><table class="table table-compact"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Λογαριασμός</th>' + (withAbs ? '<th title="Απουσίες στο μάθημα / όριο">Απουσίες</th>' : '') + '<th></th></tr></thead><tbody>';
+    h += '<div class="table-wrap" style="max-height:340px"><table class="table table-compact"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Λογαριασμός</th>' + (withAbs ? '<th title="Ώρες απουσίας στο μάθημα / όριο">Απουσίες (ώρες)</th>' : '') + '<th></th></tr></thead><tbody>';
     d.assignments.forEach((a, i) => {
       const k = App.accounts.amKey(a.am);
       const u = acc.get(k);
@@ -211,7 +211,7 @@
     // details
     h += '<div class="card"><div class="card-head"><div><h3>Στοιχεία εξέτασης</h3><div class="sub">Ενδιάμεσο τεστ — βαθμολογείται αυτόματα από το σύστημα</div></div></div><div class="card-body form-grid">' +
       '<div class="field span-2"><label>Τίτλος *</label><input class="input" id="ex-title" value="' + esc(d.title) + '" placeholder="π.χ. 1η Πρόοδος Ναυσιπλοΐας" data-on-input="exF" data-k="title" /></div>' +
-      '<div class="field span-2"><label>Μάθημα</label><select class="select" data-on-change="exSubject">' + subjectOptions(d.subjectId) + '</select><div class="hint">Με μάθημα γίνεται και ο έλεγχος απουσιών: όσοι έχουν περισσότερες από το όριο δεν μπορούν να ξεκινήσουν την εξέταση.</div></div>' +
+      '<div class="field span-2"><label>Μάθημα</label><select class="select" data-on-change="exSubject">' + subjectOptions(d.subjectId) + '</select><div class="hint">Με μάθημα γίνεται και ο έλεγχος απουσιών: όσοι έχουν περισσότερες ώρες απουσίας από το όριο του μαθήματος δεν μπορούν να ξεκινήσουν την εξέταση.</div></div>' +
       '<div class="field"><label>Ημερομηνία *</label><input class="input" type="date" id="ex-date" value="' + esc(d.date) + '" data-on-change="exF" data-k="date" /></div>' +
       '<div class="field"><label>Ώρα έναρξης *</label><input class="input" type="time" id="ex-time" value="' + esc(d.time) + '" data-on-change="exF" data-k="time" /></div>' +
       '<div class="field"><label>Διάρκεια (λεπτά) *</label><input class="input" type="number" min="1" max="600" id="ex-dur" value="' + esc(d.durationMinutes) + '" data-on-input="exF" data-k="durationMinutes" /></div>' +
@@ -283,8 +283,8 @@
       '<div class="row" style="gap:26px">' + stat(rows.length, 'ανατέθηκε') + stat(sub.length, 'υποβλήθηκαν') + (running ? stat(running, 'σε εξέλιξη') : '') + (barred.length ? stat(barred.length, 'χωρίς δικαίωμα') : '') + stat(avgP === null ? '—' : Math.round(avgP) + '%', 'μ.ο. ποσοστού') + stat(avgG === null ? '—' : avgG.toFixed(2), 'μ.ο. βαθμού 0–5') + '</div></div>';
     h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout" style="margin:0">' + icon('info') + '<p>Μετράει στην τελική βαθμολογία: <b>' + (e.countsFinal ? 'ΝΑΙ' : 'ΟΧΙ') + '</b> (απόφαση καθηγητή). Ο βαθμός του τεστ <b>δεν</b> περνά αυτόματα στο βαθμολόγιο — ο τελικός βαθμός του μαθήματος εισάγεται μόνο από τον καθηγητή.</p></div></div>';
     if (barred.length)
-      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" style="margin:0" id="ex-res-barred">' + icon('alert') + '<p>' + plural(barred.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες απουσίες από το όριο στο μάθημα και <b>δεν μπορ' + (barred.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (barred.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση (βλέπ' + (barred.length === 1 ? 'ει' : 'ουν') + ' σχετικό μήνυμα). Με «Να γράψει» δίνετε άδεια μόνο για αυτή την εξέταση.</p></div></div>';
-    h += '<div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Κατάσταση</th>' + (chk ? '<th title="Απουσίες στο μάθημα / όριο">Απουσίες</th>' : '') + '<th>Έναρξη</th><th>Υποβολή</th><th class="num">Μονάδες</th><th class="num">%</th><th class="num">Βαθμός 0–5</th><th></th></tr></thead><tbody>';
+      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" style="margin:0" id="ex-res-barred">' + icon('alert') + '<p>' + plural(barred.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες ώρες απουσίας από το όριο στο μάθημα και <b>δεν μπορ' + (barred.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (barred.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση (βλέπ' + (barred.length === 1 ? 'ει' : 'ουν') + ' σχετικό μήνυμα). Με «Να γράψει» δίνετε άδεια μόνο για αυτή την εξέταση.</p></div></div>';
+    h += '<div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Κατάσταση</th>' + (chk ? '<th title="Ώρες απουσίας στο μάθημα / όριο">Απουσίες (ώρες)</th>' : '') + '<th>Έναρξη</th><th>Υποβολή</th><th class="num">Μονάδες</th><th class="num">%</th><th class="num">Βαθμός 0–5</th><th></th></tr></thead><tbody>';
     rows.forEach((x) => {
       const no = barredRow(x);
       const s = no ? ['Χωρίς δικαίωμα (απουσίες)', 'bad'] : STATE[x.status] || [x.status, ''];
@@ -808,7 +808,7 @@
       on &&
       !(await confirmDialog(
         'Άδεια συμμετοχής',
-        '<b>' + esc(el.dataset.name) + '</b> έχει <b>' + esc(el.dataset.n) + '</b> απουσίες στο μάθημα' + (lim !== '' ? ' (όριο ' + esc(lim) + ')' : '') + ' και κανονικά δεν έχει δικαίωμα συμμετοχής.<br><br>Να μπορεί να γράψει <b>αυτή</b> την εξέταση; (Οι άλλες εξετάσεις του μαθήματος δεν αλλάζουν.)',
+        '<b>' + esc(el.dataset.name) + '</b> έχει <b>' + esc(el.dataset.n) + '</b> ώρες απουσίας στο μάθημα' + (lim !== '' ? ' (όριο ' + esc(lim) + ' ώρες)' : '') + ' και κανονικά δεν έχει δικαίωμα συμμετοχής.<br><br>Να μπορεί να γράψει <b>αυτή</b> την εξέταση; (Οι άλλες εξετάσεις του μαθήματος δεν αλλάζουν.)',
         { okText: 'Να γράψει' }
       ))
     )

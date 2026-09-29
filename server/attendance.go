@@ -1,24 +1,25 @@
 package main
 
-// Attendance: the teaching calendar of each class (one subject per day) and the students' absences,
-// both kept in the registry — calendar: [{yearId, cls, date, subjectId}], absences: [{studentId, yearId,
-// date, subjectId, by, at, src}]. This is the server twin of the calendar/absence part of src/core.js
-// (calendarKey, absenceLimit, absenceStatus); test/attendance-fixtures.json keeps both in agreement.
+// Attendance: the teaching calendar of each class (one subject per day) and the students' absences per
+// hour, both kept in the registry — calendar: [{yearId, cls, date, subjectId}], absences: [{studentId, yearId,
+// date, hour, subjectId, by, at, src}]. This is the server twin of the calendar/absence part of src/core.js
+// (calendarKey, attendance, absenceStatus); test/attendance-fixtures.json keeps both in agreement.
 //
-// Limit of a subject = settings.absenceLimitPct (default 30) % of its days in the student's class calendar,
-// rounded down (20 days → 6). A student with more absences than that may not start the exams of the subject,
-// unless the admin allowed it for that exam (exam.absenceAllowed[am]). Teachers record the absences of their
-// subjects/classes (POST /api/teacher/absences); the secretariat records them in the app (registry save).
+// Limit of a subject = subject.absenceLimit (hours, set by the admin; none = no limit). A student with more
+// hours of absence than that may not start the exams of the subject, unless the admin allowed it for that exam
+// (exam.absenceAllowed[am]). A day has settings.hoursPerDay hours (default 4). Teachers record the absences of
+// their subjects/classes (POST /api/teacher/absences); the secretariat records them in the app (registry save).
 
 import (
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 )
 
-const defaultAbsencePct = 30
+const defaultHoursPerDay = 4
 
 type regCalDay struct {
 	YearID    string `json:"yearId"`
@@ -28,11 +29,15 @@ type regCalDay struct {
 }
 
 type regAbsence struct {
-	StudentID string `json:"studentId"`
-	YearID    string `json:"yearId"`
-	Date      string `json:"date"`
-	SubjectID string `json:"subjectId"`
+	StudentID string  `json:"studentId"`
+	YearID    string  `json:"yearId"`
+	Date      string  `json:"date"`
+	Hour      float64 `json:"hour"`
+	SubjectID string  `json:"subjectId"`
 }
+
+// validHour: an integer ≥ 1 (as core.js validHour).
+func validHour(h float64) bool { return h >= 1 && h == math.Trunc(h) }
 
 // AbsenceAllow: the admin let a student over the absence limit take an exam.
 type AbsenceAllow struct {
@@ -40,21 +45,22 @@ type AbsenceAllow struct {
 	At int64  `json:"at"`
 }
 
-// absencePct: settings.absenceLimitPct when it is an integer 0–100, else 30 (as core.js absenceLimitPct).
-func absencePct(settings map[string]any) int {
-	v, ok := settings["absenceLimitPct"].(float64)
-	if !ok || v != math.Trunc(v) || v < 0 || v > 100 {
-		return defaultAbsencePct
+// hoursPerDay: settings.hoursPerDay when it is an integer 1–12, else 4 (as core.js hoursPerDay).
+func hoursPerDay(settings map[string]any) int {
+	v, ok := settings["hoursPerDay"].(float64)
+	if !ok || v != math.Trunc(v) || v < 1 || v > 12 {
+		return defaultHoursPerDay
 	}
 	return int(v)
 }
 
-// absenceLimit: absences allowed with `days` days in the calendar (⌊days × pct / 100⌋); -1 without days.
-func absenceLimit(days, pct int) int {
-	if days <= 0 {
+// subjectLimit: the subject's absence limit in hours (a JSON number, integer ≥ 0), -1 = no limit (as core.js subjectAbsenceLimit).
+func subjectLimit(v any) int {
+	f, ok := v.(float64)
+	if !ok || f < 0 || f != math.Trunc(f) {
 		return -1
 	}
-	return days * pct / 100
+	return int(f)
 }
 
 // calendarKey: "levelId|spec|section|period" of a class (Support: no specialty · Management: no section).
@@ -92,33 +98,40 @@ func dateText(s string) string {
 
 // ------------------------------------------------------------ lookups (built once per registry revision)
 type absStatus struct {
-	Count int  `json:"count"`
-	Days  int  `json:"days"`
-	Limit int  `json:"limit"` // -1 = the subject has no days in the class calendar (no limit)
+	Count int  `json:"count"` // hours of absence
+	Days  int  `json:"days"`  // the subject's days in the student's class calendar
+	Limit int  `json:"limit"` // hours; -1 = the subject has no limit
 	Over  bool `json:"over"`
 }
 
 type attIndex struct {
 	rev      int64
-	pct      int
+	hpd      int
+	limits   map[string]int // subjectId → limit in hours (-1 = none)
 	students map[string]*regStudent
 	byAM     map[string]string         // normAm → student id
 	enroll   map[string]*regEnrollment // studentId|yearId → enrollment (the first one, as core.js getEnrollment)
 	days     map[string]int            // yearId|cls|subjectId → days (the first record of a day counts)
-	absences map[string]int            // studentId|yearId|subjectId → absences (one per day)
+	absences map[string]int            // studentId|yearId|subjectId → hours of absence (the first record of an hour counts)
 }
 
 func buildAttendance(rev int64, data []byte) *attIndex {
 	var doc struct {
 		Students    []regStudent    `json:"students"`
 		Enrollments []regEnrollment `json:"enrollments"`
+		Subjects    []regSubject    `json:"subjects"`
 		Calendar    []regCalDay     `json:"calendar"`
 		Absences    []regAbsence    `json:"absences"`
 		Settings    map[string]any  `json:"settings"`
 	}
 	json.Unmarshal(data, &doc) // a field of an unexpected type is skipped, the rest is still read
-	x := &attIndex{rev: rev, pct: absencePct(doc.Settings), students: map[string]*regStudent{}, byAM: map[string]string{},
+	x := &attIndex{rev: rev, hpd: hoursPerDay(doc.Settings), limits: map[string]int{}, students: map[string]*regStudent{}, byAM: map[string]string{},
 		enroll: map[string]*regEnrollment{}, days: map[string]int{}, absences: map[string]int{}}
+	for _, sj := range doc.Subjects {
+		if _, ok := x.limits[sj.ID]; !ok {
+			x.limits[sj.ID] = subjectLimit(sj.AbsenceLimit)
+		}
+	}
 	for i := range doc.Students {
 		s := &doc.Students[i]
 		if _, ok := x.students[s.ID]; !ok {
@@ -151,7 +164,10 @@ func buildAttendance(rev int64, data []byte) *attIndex {
 	}
 	seen = map[string]bool{}
 	for _, a := range doc.Absences {
-		k := a.StudentID + "|" + a.YearID + "|" + a.Date
+		if !validHour(a.Hour) {
+			continue
+		}
+		k := a.StudentID + "|" + a.YearID + "|" + a.Date + "|" + strconv.Itoa(int(a.Hour))
 		if seen[k] {
 			continue
 		}
@@ -163,17 +179,18 @@ func buildAttendance(rev int64, data []byte) *attIndex {
 	return x
 }
 
-// status: a student's absences in a subject (year) against the limit of his class calendar.
+// status: a student's hours of absence in a subject (year) against the subject's limit.
 func (x *attIndex) status(studentID, subjectID, yearID string) absStatus {
 	out := absStatus{Count: x.absences[studentID+"|"+yearID+"|"+subjectID], Limit: -1}
+	if l, ok := x.limits[subjectID]; ok {
+		out.Limit = l
+	}
+	out.Over = out.Limit >= 0 && out.Count > out.Limit
 	st := x.students[studentID]
 	en := x.enroll[studentID+"|"+yearID]
-	if st == nil || en == nil {
-		return out
+	if st != nil && en != nil {
+		out.Days = x.days[yearID+"|"+calendarKey(en.LevelID, st.Specialty, en.Section, en.Period)+"|"+subjectID]
 	}
-	out.Days = x.days[yearID+"|"+calendarKey(en.LevelID, st.Specialty, en.Section, en.Period)+"|"+subjectID]
-	out.Limit = absenceLimit(out.Days, x.pct)
-	out.Over = out.Limit >= 0 && out.Count > out.Limit
 	return out
 }
 
@@ -227,8 +244,8 @@ func (s *Server) examBarred(e *Exam, am string) (absStatus, bool) {
 
 func errBarred(st absStatus) error {
 	return &apiError{status: 403,
-		msg:   fmt.Sprintf("Δεν έχετε δικαίωμα συμμετοχής στην εξέταση λόγω απουσιών (%d απουσίες, όριο %d). Απευθυνθείτε στη γραμματεία.", st.Count, st.Limit),
-		en:    fmt.Sprintf("You are not allowed to take this exam because of your absences (%d absences, limit %d). Please contact the Registrar’s office.", st.Count, st.Limit),
+		msg:   fmt.Sprintf("Δεν έχετε δικαίωμα συμμετοχής στην εξέταση λόγω απουσιών (%d ώρες απουσίας, όριο %d). Απευθυνθείτε στη γραμματεία.", st.Count, st.Limit),
+		en:    fmt.Sprintf("You are not allowed to take this exam because of your absences (%d hours of absence, limit %d). Please contact the Registrar’s office.", st.Count, st.Limit),
 		extra: map[string]any{"state": "barred", "code": "absences", "absences": st.Count, "absenceLimit": st.Limit}}
 }
 
@@ -262,12 +279,13 @@ func (d *regDoc) studentCalKeys(yearID string) map[string]string {
 }
 
 type absenceChange struct {
-	StudentID string `json:"studentId"`
-	Absent    bool   `json:"absent"`
+	StudentID string  `json:"studentId"`
+	Hour      float64 `json:"hour"`
+	Absent    bool    `json:"absent"`
 }
 
-// applyTeacherAbsences writes one day's absences of a teacher's subject: each student must be in his
-// classes and have that subject on that day in his class calendar. → stats {added, removed, same}.
+// applyTeacherAbsences writes absences (per hour) of one day of a teacher's subject: each student must be in
+// his classes and have that subject on that day in his class calendar. → stats {added, removed, same}.
 func (d *regDoc) applyTeacherAbsences(user *User, yearID, subjectID, date string, changes []absenceChange, now time.Time) (map[string]int, error) {
 	var mine []TeachAssignment
 	for _, a := range user.Assignments {
@@ -302,7 +320,11 @@ func (d *regDoc) applyTeacherAbsences(user *User, yearID, subjectID, date string
 		}
 	}
 	keys := d.studentCalKeys(yearID)
+	hpd := hoursPerDay(d.settings)
 	for _, c := range changes {
+		if !validHour(c.Hour) || int(c.Hour) > hpd {
+			return nil, bad(fmt.Sprintf("Μη έγκυρη ώρα «%v» (1–%d).", c.Hour, hpd))
+		}
 		if !allowed[c.StudentID] {
 			return nil, bad("Ο σπουδαστής δεν ανήκει στα τμήματά σας για αυτό το μάθημα.")
 		}
@@ -314,22 +336,23 @@ func (d *regDoc) applyTeacherAbsences(user *User, yearID, subjectID, date string
 	if raw, ok := d.top["absences"]; ok {
 		json.Unmarshal(raw, &list)
 	}
-	same := func(a map[string]any, sid string) bool {
-		return a["studentId"] == sid && a["yearId"] == yearID && a["date"] == date
+	same := func(a map[string]any, sid string, hour float64) bool {
+		h, _ := a["hour"].(float64)
+		return a["studentId"] == sid && a["yearId"] == yearID && a["date"] == date && h == hour
 	}
 	stats := map[string]int{"added": 0, "removed": 0, "same": 0}
 	at := isoNow()
 	for _, c := range changes {
 		var cur map[string]any
 		for _, a := range list {
-			if same(a, c.StudentID) {
+			if same(a, c.StudentID, c.Hour) {
 				cur = a
 				break
 			}
 		}
 		switch {
 		case c.Absent && cur == nil:
-			list = append(list, map[string]any{"studentId": c.StudentID, "yearId": yearID, "date": date, "subjectId": subjectID, "by": user.Username, "at": at, "src": "teacher"})
+			list = append(list, map[string]any{"studentId": c.StudentID, "yearId": yearID, "date": date, "hour": int(c.Hour), "subjectId": subjectID, "by": user.Username, "at": at, "src": "teacher"})
 			stats["added"]++
 		case c.Absent:
 			if s, _ := cur["subjectId"].(string); s != subjectID {
@@ -341,7 +364,7 @@ func (d *regDoc) applyTeacherAbsences(user *User, yearID, subjectID, date string
 		case cur != nil:
 			kept := list[:0]
 			for _, a := range list {
-				if !same(a, c.StudentID) {
+				if !same(a, c.StudentID, c.Hour) {
 					kept = append(kept, a)
 				}
 			}

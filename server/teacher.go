@@ -43,13 +43,14 @@ type regEnrollment struct {
 	Period    *string `json:"period"`
 }
 type regSubject struct {
-	ID        string  `json:"id"`
-	LevelID   string  `json:"levelId"`
-	Specialty string  `json:"specialty"`
-	Code      string  `json:"code"`
-	Name      string  `json:"name"`
-	Active    *bool   `json:"active"`
-	Order     float64 `json:"order"`
+	ID           string  `json:"id"`
+	LevelID      string  `json:"levelId"`
+	Specialty    string  `json:"specialty"`
+	Code         string  `json:"code"`
+	Name         string  `json:"name"`
+	Active       *bool   `json:"active"`
+	Order        float64 `json:"order"`
+	AbsenceLimit any     `json:"absenceLimit"` // hours (an integer ≥ 0); anything else = no limit
 }
 type regYear struct {
 	ID        string            `json:"id"`
@@ -242,7 +243,7 @@ func (d *regDoc) teacherView(assignments []TeachAssignment) map[string]any {
 		"imports": []any{},
 	}
 	settings := map[string]any{}
-	for _, k := range []string{"sections", "levelNames", "currentYearId", "gradeLocks", "periods", "levelPeriods", "absenceLimitPct"} {
+	for _, k := range []string{"sections", "levelNames", "currentYearId", "gradeLocks", "periods", "levelPeriods", "hoursPerDay"} {
 		if v, ok := d.settings[k]; ok {
 			settings[k] = v
 		}

@@ -180,11 +180,11 @@
       } else if (!list.length) {
         h += emptyState('book', 'Κανένα μάθημα με αυτό το φίλτρο', 'Επιλέξτε «Όλα» για να δείτε όλα τα μαθήματα του επιπέδου.');
       } else {
-        h += '<div class="table-wrap"><table class="table sb-table"><thead><tr><th style="width:70px">Σειρά</th><th>Κωδικός</th><th>Μάθημα</th>' + (unified ? '' : '<th>Ειδικότητα</th>') + '<th class="num">Συντελεστής</th><th class="num" title="Βαθμοί του ' + esc(C.yearLabel(db, yearId)) + '">Βαθμοί</th><th title="Καθηγητές του ' + esc(C.yearLabel(db, yearId)) + ' (κάθε καθηγητής βλέπει μόνο τα τμήματά του)">Καθηγητές</th><th>Κατάσταση</th><th></th></tr></thead><tbody>';
+        h += '<div class="table-wrap"><table class="table sb-table"><thead><tr><th style="width:70px">Σειρά</th><th>Κωδικός</th><th>Μάθημα</th>' + (unified ? '' : '<th>Ειδικότητα</th>') + '<th class="num">Συντελεστής</th><th class="num" title="Όριο απουσιών σε ώρες">Όριο απουσιών</th><th class="num" title="Βαθμοί του ' + esc(C.yearLabel(db, yearId)) + '">Βαθμοί</th><th title="Καθηγητές του ' + esc(C.yearLabel(db, yearId)) + ' (κάθε καθηγητής βλέπει μόνο τα τμήματά του)">Καθηγητές</th><th>Κατάσταση</th><th></th></tr></thead><tbody>';
         list.forEach((s, i) => {
           const n = db.grades.filter((g) => g.subjectId === s.id && g.yearId === yearId).length;
           h += '<tr' + (s.active === false ? ' style="opacity:.6"' : '') + '><td class="nowrap"><button class="btn btn-ghost btn-icon btn-sm" data-action="sbMove" data-id="' + s.id + '" data-dir="-1" title="Πάνω"' + (i === 0 || spec !== 'ALL' ? ' disabled' : '') + '>' + icon('up') + '</button><button class="btn btn-ghost btn-icon btn-sm" data-action="sbMove" data-id="' + s.id + '" data-dir="1" title="Κάτω"' + (i === list.length - 1 || spec !== 'ALL' ? ' disabled' : '') + '>' + icon('down') + '</button></td>' +
-            '<td class="mono strong">' + esc(s.code || '—') + '</td><td class="strong">' + esc(s.name) + '</td>' + (unified ? '' : '<td>' + specBadge(s.specialty) + '</td>') + '<td class="num">' + esc(C.formatGrade(s.weight || 1)) + '</td><td class="num">' + n + '</td>' +
+            '<td class="mono strong">' + esc(s.code || '—') + '</td><td class="strong">' + esc(s.name) + '</td>' + (unified ? '' : '<td>' + specBadge(s.specialty) + '</td>') + '<td class="num">' + esc(C.formatGrade(s.weight || 1)) + '</td><td class="num">' + (C.subjectAbsenceLimit(s) === null ? '<span class="faint" title="Χωρίς όριο απουσιών">—</span>' : C.subjectAbsenceLimit(s) + ' ώρ.') + '</td><td class="num">' + n + '</td>' +
             '<td class="sb-tcell">' + teachersCell(db, yearId, s) + '</td>' +
             '<td>' + (s.active === false ? '<span class="badge">Ανενεργό</span>' : '<span class="badge badge-success">Ενεργό</span>') + '</td>' +
             '<td class="right nowrap">' + syllabusButton(s) + ' <button class="btn btn-sm" data-action="sbTemplate" data-id="' + s.id + '" title="Πρότυπο Excel για τον καθηγητή">' + icon('sheet') + '<span class="sb-lbl">Πρότυπο</span></button> ' +
@@ -197,7 +197,7 @@
         h += '</tbody></table></div>';
       }
       h += '</div>';
-      h += '<p class="small muted" style="margin-top:12px">' + icon('info', 'width="13" height="13" style="vertical-align:-2px"') + ' Ο <b>συντελεστής</b> βαραίνει το μάθημα στον μέσο όρο (προεπιλογή 1). Ένα μάθημα με βαθμούς δεν διαγράφεται — απενεργοποιήστε το για να μην εμφανίζεται σε νέα έτη.</p>';
+      h += '<p class="small muted" style="margin-top:12px">' + icon('info', 'width="13" height="13" style="vertical-align:-2px"') + ' Ο <b>συντελεστής</b> βαραίνει το μάθημα στον μέσο όρο (προεπιλογή 1). Το <b>όριο απουσιών</b> (ώρες) ορίζεται στην Επεξεργασία του μαθήματος. Ένα μάθημα με βαθμούς δεν διαγράφεται — απενεργοποιήστε το για να μην εμφανίζεται σε νέα έτη.</p>';
       h += '</div>';
       return h;
     },
@@ -237,6 +237,7 @@
       '<div class="field span-2"><label>Επίπεδο</label><select class="select" id="sb-level"' + (s && C.subjectUsage(S().db, s.id) ? ' disabled title="Το μάθημα έχει βαθμούς"' : '') + '>' + options(levelOpts, s ? s.levelId : F.levelId) + '</select></div>' +
       '<div class="field"><label>Κωδικός</label><input class="input" id="sb-code" value="' + esc(s ? s.code : '') + '" placeholder="π.χ. NAV101" /><div class="hint">Προαιρετικός — εμφανίζεται στις στήλες του Excel.</div></div>' +
       '<div class="field"><label>Συντελεστής</label><input class="input" id="sb-weight" type="number" min="0.5" step="0.5" value="' + esc(s ? s.weight : 1) + '" /></div>' +
+      '<div class="field"><label>Όριο απουσιών (ώρες)</label><input class="input" id="sb-abs" type="number" min="0" step="1" value="' + esc(s && C.subjectAbsenceLimit(s) !== null ? C.subjectAbsenceLimit(s) : '') + '" placeholder="χωρίς όριο" /><div class="hint">Με περισσότερες ώρες απουσίας ο σπουδαστής δεν γράφει τις εξετάσεις του μαθήματος. Κενό = χωρίς όριο.</div></div>' +
       '<div class="field span-2"><label>Όνομα μαθήματος *</label><input class="input" id="sb-name" value="' + esc(s ? s.name : '') + '" autofocus /></div>' +
       '<div class="field span-2"><label>Αφορά</label><select class="select" id="sb-spec">' + options(C.SUBJECT_SPECIALTIES.map((x) => ({ value: x.id, label: x.name })), s ? s.specialty : F.spec !== 'ALL' && !C.isUnifiedLevel(F.levelId) ? F.spec : 'COMMON') + '</select><div class="hint" id="sb-spec-hint"></div></div>' +
       (s ? '<label class="checkbox span-2"><input type="checkbox" id="sb-active"' + (s.active !== false ? ' checked' : '') + ' /> Ενεργό μάθημα</label>' : '') +
@@ -265,6 +266,7 @@
       code: ctx.q('#sb-code').value,
       name: ctx.q('#sb-name').value,
       weight: ctx.q('#sb-weight').value,
+      absenceLimit: C.parseAbsenceLimit(ctx.q('#sb-abs').value),
       specialty: ctx.q('#sb-spec').value,
       active: ctx.q('#sb-active') ? ctx.q('#sb-active').checked : true,
     };

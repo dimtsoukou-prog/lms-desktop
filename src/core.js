@@ -496,6 +496,16 @@
     ['years', 'students', 'enrollments', 'subjects', 'grades', 'imports', 'calendar', 'absences'].forEach((k) => {
       if (!Array.isArray(out[k])) out[k] = [];
     });
+    // an absence recorded for a whole day (before absences were kept per hour) = every hour of that day
+    if (out.absences.some((a) => a && a.hour === undefined)) {
+      const hpd = hoursPerDay(out);
+      const list = [];
+      out.absences.forEach((a) => {
+        if (!a || a.hour !== undefined) return void list.push(a);
+        for (let h = 1; h <= hpd; h++) list.push(Object.assign({}, a, { hour: h }));
+      });
+      out.absences = list;
+    }
     fillSinglePeriods(out);
     if (!out.years.length) {
       out.years.push({ id: uid('yr'), label: academicYearLabelFor(new Date()), createdAt: nowIso() });
@@ -1001,6 +1011,8 @@
       order: siblings.length ? Math.max.apply(null, siblings.map((x) => x.order)) + 1 : 0,
       createdAt: nowIso(),
     };
+    const lim = parseAbsenceLimit(data.absenceLimit);
+    if (lim !== null) s.absenceLimit = lim;
     db.subjects.push(s);
     return s;
   }
@@ -1024,6 +1036,11 @@
     if (isUnifiedLevel(s.levelId)) s.specialty = 'COMMON';
     if (data.weight !== undefined) s.weight = Number(data.weight) > 0 ? Number(data.weight) : 1;
     if (data.active !== undefined) s.active = !!data.active;
+    if (data.absenceLimit !== undefined) {
+      const lim = parseAbsenceLimit(data.absenceLimit);
+      if (lim === null) delete s.absenceLimit;
+      else s.absenceLimit = lim;
+    }
     return s;
   }
 
@@ -1501,14 +1518,15 @@
   /*
    * Teaching calendar per class (τμήμα), one subject per day:
    *   db.calendar = [{yearId, cls, date, subjectId}]      cls = calendarKey(…), date = "YYYY-MM-DD"
-   * Absences, one per student per day, for the subject his class has that day:
-   *   db.absences = [{studentId, yearId, date, subjectId, by, at, src: 'admin' | 'teacher'}]
-   * Limit of a subject = settings.absenceLimitPct (default 30) % of its days in the student's class
-   * calendar, rounded down (20 days → 6). Every absence counts. More absences than the limit → the
-   * student may not start the exams of that subject, unless the admin allowed it for that exam.
-   * server/attendance.go mirrors calendarKey / absenceLimit / absenceStatus (test/attendance-fixtures.json).
+   * Absences per HOUR of a day (settings.hoursPerDay, default 4), for the subject his class has that day:
+   *   db.absences = [{studentId, yearId, date, hour: 1…, subjectId, by, at, src: 'admin' | 'teacher'}]
+   * Limit of a subject = subject.absenceLimit (hours, set by the admin; none = no limit). Every hour counts.
+   * More hours of absence than the limit → the student may not start the exams of that subject, unless
+   * the admin allowed it for that exam.
+   * server/attendance.go mirrors calendarKey / absence counting / absenceStatus (test/attendance-fixtures.json).
    */
-  const DEFAULT_ABSENCE_PCT = 30;
+  const DEFAULT_HOURS_PER_DAY = 4;
+  const MAX_HOURS_PER_DAY = 12;
   const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
   const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -1562,23 +1580,37 @@
       throw new Error('Η ημερομηνία ' + dateText(date) + ' δεν ανήκει στο ακαδημαϊκό έτος ' + yearLabel(db, yearId) + ' (' + dateText(r.from) + ' – ' + dateText(r.to) + ').');
   }
 
-  /** The absence limit in % of a subject's days (settings.absenceLimitPct: an integer 0–100, default 30). */
-  function absenceLimitPct(db) {
-    const v = db && db.settings ? db.settings.absenceLimitPct : undefined;
-    return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100 ? v : DEFAULT_ABSENCE_PCT;
+  /** Teaching hours of a day (settings.hoursPerDay: an integer 1–12, default 4) — one absence toggle per hour. */
+  function hoursPerDay(db) {
+    const v = db && db.settings ? db.settings.hoursPerDay : undefined;
+    return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_HOURS_PER_DAY ? v : DEFAULT_HOURS_PER_DAY;
   }
 
-  function setAbsenceLimitPct(db, value) {
-    const t = String(value === undefined || value === null ? '' : value).trim().replace('%', '').replace(',', '.').trim();
+  function setHoursPerDay(db, value) {
+    const t = String(value === undefined || value === null ? '' : value).trim();
     const n = Number(t);
-    if (!t || !Number.isInteger(n) || n < 0 || n > 100) throw new Error('Το όριο απουσιών είναι ποσοστό: ακέραιος από 0 έως 100.');
-    db.settings.absenceLimitPct = n;
+    if (!t || !Number.isInteger(n) || n < 1 || n > MAX_HOURS_PER_DAY) throw new Error('Οι ώρες ανά ημέρα είναι ακέραιος από 1 έως ' + MAX_HOURS_PER_DAY + '.');
+    db.settings.hoursPerDay = n;
     return n;
   }
 
-  /** Absences allowed in a subject with `days` days in the calendar: ⌊days × pct / 100⌋ (null without days). */
-  function absenceLimit(days, pct) {
-    return days > 0 ? Math.floor((days * pct) / 100) : null;
+  /** A subject's absence limit in hours (subject.absenceLimit: an integer ≥ 0), or null = no limit. */
+  function subjectAbsenceLimit(subject) {
+    const v = subject ? subject.absenceLimit : undefined;
+    return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+  }
+
+  /** Form value of a limit → integer ≥ 0, or null when empty (throws on anything else). */
+  function parseAbsenceLimit(value) {
+    const t = String(value === undefined || value === null ? '' : value).trim();
+    if (!t) return null;
+    const n = Number(t);
+    if (!Number.isInteger(n) || n < 0 || n > 9999) throw new Error('Το όριο απουσιών είναι αριθμός ωρών (ακέραιος 0 ή μεγαλύτερος) — ή κενό για «χωρίς όριο».');
+    return n;
+  }
+
+  function validHour(h) {
+    return typeof h === 'number' && Number.isInteger(h) && h >= 1;
   }
 
   /**
@@ -1668,7 +1700,8 @@
   /**
    * The calendar and the absences of a year as lookups (the first record of a day counts):
    * cal.day "cls|date" → subjectId · cal.days "cls|subjectId" → days ·
-   * abs.byDay "studentId|date" → absence · abs.bySubject "studentId|subjectId" → sorted dates.
+   * abs.byDay "studentId|date" → sorted hours absent · abs.bySubject "studentId|subjectId" → [{date, hour}] sorted
+   * (the first record of a student's hour counts; a record without a valid hour is ignored).
    */
   function attendance(db, yearId) {
     const day = new Map();
@@ -1681,20 +1714,25 @@
       const n = d.cls + '|' + d.subjectId;
       days.set(n, (days.get(n) || 0) + 1);
     });
+    const seen = new Set();
     const byDay = new Map();
     const bySubject = new Map();
     (db.absences || []).forEach((a) => {
-      if (!a || a.yearId !== yearId) return;
+      if (!a || a.yearId !== yearId || !validHour(a.hour)) return;
+      const h = a.studentId + '|' + a.date + '|' + a.hour;
+      if (seen.has(h)) return;
+      seen.add(h);
       const k = a.studentId + '|' + a.date;
-      if (byDay.has(k)) return;
-      byDay.set(k, a);
+      if (!byDay.has(k)) byDay.set(k, []);
+      byDay.get(k).push(a.hour);
       if (!a.subjectId) return;
       const s = a.studentId + '|' + a.subjectId;
       if (!bySubject.has(s)) bySubject.set(s, []);
-      bySubject.get(s).push(a.date);
+      bySubject.get(s).push({ date: a.date, hour: a.hour });
     });
-    bySubject.forEach((l) => l.sort());
-    return { yearId, pct: absenceLimitPct(db), cal: { day, days }, abs: { byDay, bySubject } };
+    byDay.forEach((l) => l.sort((x, y) => x - y));
+    bySubject.forEach((l) => l.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.hour - y.hour)));
+    return { yearId, hpd: hoursPerDay(db), cal: { day, days }, abs: { byDay, bySubject } };
   }
 
   /** The calendar record of a class on a day, or null. */
@@ -1806,57 +1844,110 @@
     return r;
   }
 
-  function getAbsence(db, studentId, yearId, date) {
-    return (db.absences || []).find((a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date) || null;
+  /** The hours a student was absent on a day (sorted), [] when none. */
+  function absenceHours(db, studentId, yearId, date) {
+    const out = [];
+    (db.absences || []).forEach((a) => {
+      if (a && a.studentId === studentId && a.yearId === yearId && a.date === date && validHour(a.hour) && !out.includes(a.hour)) out.push(a.hour);
+    });
+    return out.sort((x, y) => x - y);
   }
 
-  /**
-   * Record (on = true) or remove an absence of a student on a day. The absence gets the subject his class
-   * has that day in the calendar (no subject that day → error). meta: {by, src}. → the absence | null.
-   */
-  function setAbsence(db, studentId, yearId, date, on, meta) {
-    db.absences = db.absences || [];
-    const same = (a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date;
-    if (!on) {
-      db.absences = db.absences.filter((a) => !same(a));
-      return null;
-    }
+  function getAbsence(db, studentId, yearId, date, hour) {
+    return (db.absences || []).find((a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date && a.hour === hour) || null;
+  }
+
+  /** The subject of a student's class on a day (throws when not enrolled / no subject that day). */
+  function daySubjectOf(db, studentId, yearId, date) {
     const st = db.students.find((s) => s.id === studentId);
     if (!st) throw new Error('Ο σπουδαστής δεν βρέθηκε.');
     const key = studentCalendarKey(db, st, yearId);
     if (!key) throw new Error('Ο/Η ' + studentName(st) + ' δεν είναι εγγεγραμμένος/η στο ' + yearLabel(db, yearId) + '.');
     const day = calendarDay(db, yearId, key, date);
     if (!day) throw new Error('Το τμήμα του/της ' + studentName(st) + ' δεν έχει μάθημα στις ' + dateText(date) + ' στο ημερολόγιο.');
+    return day.subjectId;
+  }
+
+  /**
+   * Record (on = true) or remove the absence of a student in one hour of a day. It gets the subject his class
+   * has that day in the calendar (no subject that day → error). meta: {by, src}. → the absence | null.
+   */
+  function setAbsence(db, studentId, yearId, date, hour, on, meta) {
+    db.absences = db.absences || [];
+    const same = (a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date && a.hour === hour;
+    if (!on) {
+      db.absences = db.absences.filter((a) => !same(a));
+      return null;
+    }
+    const hpd = hoursPerDay(db);
+    if (!validHour(hour) || hour > hpd) throw new Error('Μη έγκυρη ώρα «' + hour + '» (1–' + hpd + ').');
+    const sid = daySubjectOf(db, studentId, yearId, date);
     const m = meta || {};
     const cur = db.absences.find(same);
     if (cur) {
-      if (cur.subjectId !== day.subjectId) {
-        cur.subjectId = day.subjectId;
+      if (cur.subjectId !== sid) {
+        cur.subjectId = sid;
         cur.at = nowIso();
       }
       return cur;
     }
-    const a = { studentId, yearId, date, subjectId: day.subjectId, by: m.by || '', at: nowIso(), src: m.src || 'admin' };
+    const a = { studentId, yearId, date, hour, subjectId: sid, by: m.by || '', at: nowIso(), src: m.src || 'admin' };
     db.absences.push(a);
     return a;
   }
 
+  /** Set exactly which hours of a day a student was absent (hours: [1…]; [] = present all day). → changes made */
+  function setDayAbsences(db, studentId, yearId, date, hours, meta) {
+    const want = new Set(hours || []);
+    const have = absenceHours(db, studentId, yearId, date);
+    let n = 0;
+    have.forEach((h) => {
+      if (!want.has(h)) {
+        setAbsence(db, studentId, yearId, date, h, false);
+        n++;
+      }
+    });
+    Array.from(want)
+      .sort((x, y) => x - y)
+      .forEach((h) => {
+        if (!have.includes(h)) {
+          setAbsence(db, studentId, yearId, date, h, true, meta);
+          n++;
+        }
+      });
+    return n;
+  }
+
   /**
-   * A student's absences in a subject (year) against the limit of his class calendar →
-   * {count, days, limit, pct, over, left, dates} — limit null (never over) when the subject has no days in it.
+   * A student's hours of absence in a subject (year) against the subject's limit →
+   * {count, limit, over, left, days, hours, entries:[{date, hour}], dates} — limit null (never over) when
+   * the subject has no limit; days / hours = the subject's days in his class calendar and their hours.
    * att: attendance(db, yearId), to reuse for many students.
    */
   function absenceStatus(db, student, subjectId, yearId, att) {
     const A = att && att.yearId === yearId ? att : attendance(db, yearId);
     const key = studentCalendarKey(db, student, yearId);
     const days = key ? A.cal.days.get(key + '|' + subjectId) || 0 : 0;
-    const limit = absenceLimit(days, A.pct);
-    const dates = (A.abs.bySubject.get(student.id + '|' + subjectId) || []).slice();
-    return { count: dates.length, days, limit, pct: A.pct, over: limit !== null && dates.length > limit, left: limit === null ? null : limit - dates.length, dates };
+    const limit = subjectAbsenceLimit(db.subjects.find((s) => s.id === subjectId));
+    const entries = (A.abs.bySubject.get(student.id + '|' + subjectId) || []).slice();
+    const dates = [];
+    entries.forEach((e) => dates[dates.length - 1] !== e.date && dates.push(e.date));
+    const count = entries.length;
+    return { count, limit, over: limit !== null && count > limit, left: limit === null ? null : limit - count, days, hours: days * A.hpd, entries, dates };
+  }
+
+  /** "12/11/2026 (1η, 3η ώρα)" lines of absence entries, grouped by day. */
+  function absenceEntriesText(entries) {
+    const byDate = new Map();
+    (entries || []).forEach((e) => {
+      if (!byDate.has(e.date)) byDate.set(e.date, []);
+      byDate.get(e.date).push(e.hour);
+    });
+    return Array.from(byDate.entries()).map(([d, hs]) => dateText(d) + ' (' + hs.map((h) => h + 'η').join(', ') + ' ώρα)');
   }
 
   /**
-   * Absences of a class per subject → {pct, subjects:[{subject, days, limit}], rows:[{student, withdrawn, cells:[{count, over, dates}], total, over}]}.
+   * Hours of absence of a class per subject → {hpd, subjects:[{subject, days, limit}], rows:[{student, withdrawn, cells:[{count, over, entries}], total, over}]}.
    * subjects: those with days in the class calendar (subject order), plus any other subject its students have absences in.
    */
   function absenceSummary(db, yearId, key) {
@@ -1872,20 +1963,17 @@
       .map((id) => order.get(id))
       .filter(Boolean)
       .sort((a, b) => LEVEL_IDS.indexOf(a.levelId) - LEVEL_IDS.indexOf(b.levelId) || a.order - b.order || compareText(a.name, b.name))
-      .map((s) => {
-        const days = A.cal.days.get(key + '|' + s.id) || 0;
-        return { subject: s, days, limit: absenceLimit(days, A.pct) };
-      });
+      .map((s) => ({ subject: s, days: A.cal.days.get(key + '|' + s.id) || 0, limit: subjectAbsenceLimit(s) }));
     const enOf = yearEnrollments(db, yearId);
     const rows = students.map((st) => {
       const cells = subjects.map((x) => {
-        const dates = A.abs.bySubject.get(st.id + '|' + x.subject.id) || [];
-        return { count: dates.length, over: x.limit !== null && dates.length > x.limit, dates };
+        const entries = A.abs.bySubject.get(st.id + '|' + x.subject.id) || [];
+        return { count: entries.length, over: x.limit !== null && entries.length > x.limit, entries };
       });
       const en = enOf.get(st.id);
       return { student: st, withdrawn: !!(en && en.withdrawn), cells, total: cells.reduce((n, c) => n + c.count, 0), over: cells.some((c) => c.over) };
     });
-    return { pct: A.pct, subjects, rows };
+    return { hpd: A.hpd, subjects, rows };
   }
 
   /**
@@ -3259,7 +3347,7 @@
     grades: ['studentId', 'subjectId', 'yearId'],
     enrollments: ['studentId', 'yearId'],
     calendar: ['yearId', 'cls', 'date'],
-    absences: ['studentId', 'yearId', 'date'],
+    absences: ['studentId', 'yearId', 'date', 'hour'],
   };
   const MERGE_SETTING_MAPS = { gradeLocks: true, levelNames: true, levelPeriods: true };
 
@@ -3383,7 +3471,7 @@
    * 3-way merge of registry objects (plain, already parsed): base = the version both sides started from,
    * mine = the admin's version, theirs = the server's current version. Inputs are not changed.
    * Records are merged by key (years/students/subjects/imports: id, grades: studentId|subjectId|yearId,
-   * enrollments: studentId|yearId, calendar: yearId|cls|date, absences: studentId|yearId|date),
+   * enrollments: studentId|yearId, calendar: yearId|cls|date, absences: studentId|yearId|date|hour),
    * settings per key (gradeLocks / levelNames / levelPeriods per sub-key),
    * any other top-level field as a whole; updatedAt = the later one. Per record: changed on one side →
    * that side; changed identically → it; changed differently on both → conflict (merged keeps mine).
@@ -3594,16 +3682,17 @@
     deepEqual,
     mergeRegistry,
     // v2.3 — calendar & absences
-    DEFAULT_ABSENCE_PCT,
+    DEFAULT_HOURS_PER_DAY,
     validIsoDate,
     isoDate,
     addDays,
     isoWeekday,
     dateText,
     yearDateRange,
-    absenceLimitPct,
-    setAbsenceLimitPct,
-    absenceLimit,
+    hoursPerDay,
+    setHoursPerDay,
+    subjectAbsenceLimit,
+    parseAbsenceLimit,
     calendarKey,
     parseCalendarKey,
     studentCalendarKey,
@@ -3619,8 +3708,11 @@
     fillCalendar,
     copyCalendar,
     getAbsence,
+    absenceHours,
     setAbsence,
+    setDayAbsences,
     absenceStatus,
+    absenceEntriesText,
     absenceSummary,
     subjectDates,
     subjectAttendanceUsage,

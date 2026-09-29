@@ -3,9 +3,9 @@
  *
  *   xvfb-run -a node test/e2e-absences.js
  *
- * admin: fills the calendar of Support Morning 1 (one subject per day), records an absence in a day's dialog,
- * changes a day's subject, sees the summary, changes the limit % in Ρυθμίσεις · teacher: «Απουσίες» tab,
- * marks absences of past days → the student goes over the limit · student over the limit: the exam card says
+ * admin: sets the absence limit of a subject (hours), fills the calendar of Support Morning 1 (one subject per day),
+ * toggles hours of absence in a day's dialog, changes a day's subject, sees the summary · teacher: «Απουσίες» tab,
+ * toggles the hours of a past day → the student goes over the limit · student over the limit: the exam card says
  * he is not eligible and there is no Start button (the server refuses too), another student can start ·
  * admin: the results show "Χωρίς δικαίωμα (απουσίες)" → «Να γράψει» → the student can now start the exam.
  */
@@ -50,8 +50,13 @@ async function launch() {
 
 async function login(u, p) {
   await win.waitForSelector('#lg-user');
+  await win.waitForSelector('.srv-dot.ok'); // the form is drawn again when the server check ends
   await win.fill('#lg-user', u);
   await win.fill('#lg-pass', p);
+  if ((await win.inputValue('#lg-user')) !== u || (await win.inputValue('#lg-pass')) !== p) {
+    await win.fill('#lg-user', u);
+    await win.fill('#lg-pass', p);
+  }
   await win.click('#lg-go');
 }
 
@@ -120,10 +125,22 @@ const text = (sel) => win.textContent(sel);
   await api('POST', '/api/exams/' + exam.id + '/publish', { published: true }, adm);
 
   // ================================================================ admin: calendar
-  step('admin: «Ημερολόγιο & απουσίες» — fill two weeks of NAV101 for Support Morning 1');
+  step('admin: «Μαθήματα» → the absence limit of NAV101 = 5 hours');
   await launch();
   await login(ADMIN, ADMIN_PW);
   await win.waitForSelector('#nav .nav-item');
+  await win.click('.nav-item:has-text("Μαθήματα")');
+  await win.click('button[data-action="sbEdit"][data-id="' + nav.id + '"]');
+  await win.waitForSelector('#sb-abs');
+  await win.waitForFunction(() => document.activeElement && document.activeElement.id === 'sb-name'); // the dialog's own focus first
+  assert.strictEqual(await win.inputValue('#sb-abs'), '', 'no limit yet');
+  await win.fill('#sb-abs', '5');
+  await win.click('.modal-foot button:has-text("Αποθήκευση")');
+  await settle();
+  assert.strictEqual(server.registry().subjects.find((x) => x.id === nav.id).absenceLimit, 5);
+  assert.ok((await text('tr:has-text("NAV101")')).includes('5 ώρ.'));
+
+  step('admin: «Ημερολόγιο & απουσίες» — fill two weeks of NAV101 for Support Morning 1');
   await win.click('.nav-item:has-text("Ημερολόγιο")');
   await win.waitForSelector('#cal-cls');
   const clsOpts = await win.$$eval('#cal-cls option', (o) => o.map((x) => x.textContent));
@@ -141,18 +158,27 @@ const text = (sel) => win.textContent(sel);
   await settle();
   assert.strictEqual((await text('#cal-month')).trim(), 'Οκτώβριος 2025');
   assert.strictEqual(await win.locator('.cal-day .cal-subj:has-text("NAV101")').count(), 10);
-  assert.ok((await text('.cal-legend')).includes('10 ημέρες · έως 3 απουσίες'), await text('.cal-legend'));
+  const legend = await text('.cal-legend');
+  assert.ok(legend.includes('10 ημέρες · όριο 5 ώρες') && legend.includes('ENG101') && legend.includes('χωρίς όριο'), legend);
 
-  step('admin: a day → its subject and who was absent; another day becomes English');
+  step('admin: a day → its subject and the hours each student was absent; another day becomes English');
   await win.click('button.cal-day[data-date="2025-10-06"]');
   await win.waitForSelector('#cd-subject');
   assert.strictEqual(await win.inputValue('#cd-subject'), nav.id);
-  await win.check('[data-cd="' + a.id + '"]');
-  assert.ok((await text('[data-cd-n="' + a.id + '"]')).startsWith('1 / 3'));
+  assert.strictEqual(await win.locator('button[data-cd="' + a.id + '"]').count(), 5, '4 hours + «όλες»');
+  await win.click('button[data-cd="' + a.id + '"][data-h="1"]');
+  await win.click('button[data-cd="' + a.id + '"][data-h="2"]');
+  assert.ok((await text('[data-cd-n="' + a.id + '"]')).startsWith('2 / 5'));
+  assert.strictEqual(await win.getAttribute('button[data-cd="' + a.id + '"][data-h="2"]', 'aria-pressed'), 'true');
+  await win.click('button[data-cd="' + b.id + '"][data-h="all"]');
+  assert.ok((await text('[data-cd-n="' + b.id + '"]')).startsWith('4 / 5'));
+  await win.click('button[data-cd="' + b.id + '"][data-h="all"]'); // again: present all day
+  assert.ok((await text('[data-cd-n="' + b.id + '"]')).startsWith('0 / 5'));
+  assert.strictEqual((await text('#cd-count')).trim(), '1 σπουδαστής · 2 ώρες');
   await shot('51-calendar-day');
   await win.click('#cd-save');
   await settle();
-  assert.ok((await text('button.cal-day[data-date="2025-10-06"]')).includes('1 απουσία'));
+  assert.ok((await text('button.cal-day[data-date="2025-10-06"]')).includes('2 ώρες απουσίας'));
   await win.click('button.cal-day[data-date="2025-10-20"]');
   await win.waitForSelector('#cd-subject');
   await win.selectOption('#cd-subject', eng.id);
@@ -162,6 +188,7 @@ const text = (sel) => win.textContent(sel);
   await shot('52-calendar-month');
   let saved = server.registry();
   assert.strictEqual(saved.calendar.length, 11);
+  assert.deepStrictEqual(saved.absences.map((x) => [x.studentId, x.date, x.hour, x.subjectId, x.src]), [[a.id, '2025-10-06', 1, nav.id, 'admin'], [a.id, '2025-10-06', 2, nav.id, 'admin']]);
 
   step('admin: Morning 2 copies the calendar of Morning 1 (days only, not absences)');
   await win.selectOption('#cal-cls', 'SUP||M2|OCT');
@@ -172,30 +199,20 @@ const text = (sel) => win.textContent(sel);
   await settle();
   assert.strictEqual(await win.locator('.cal-day .cal-subj').count(), 11);
   assert.strictEqual(await win.locator('.cal-day .cal-abs').count(), 0);
-  saved = server.registry();
-  assert.strictEqual(saved.calendar.length, 22);
+  assert.strictEqual(server.registry().calendar.length, 22);
   await win.selectOption('#cal-cls', 'SUP||M1|OCT');
   await win.waitForSelector('.cal-day .cal-abs');
-  assert.deepStrictEqual(saved.absences.map((x) => [x.studentId, x.date, x.subjectId, x.src]), [[a.id, '2025-10-06', nav.id, 'admin']]);
 
-  step('admin: the limit % in Ρυθμίσεις (30 → 20: 10 days → 2 absences)');
+  step('admin: Ρυθμίσεις → hours per day (4)');
   await win.click('.nav-item:has-text("Ρυθμίσεις")');
-  await win.waitForSelector('#abs-pct');
-  assert.strictEqual(await win.inputValue('#abs-pct'), '30');
-  await win.fill('#abs-pct', '20');
-  await win.click('[data-action="saveAbsencePct"]');
-  await settle();
-  assert.strictEqual(server.registry().settings.absenceLimitPct, 20);
-  await win.click('.nav-item:has-text("Ημερολόγιο")');
-  await win.waitForSelector('.cal-legend');
-  assert.ok((await text('.cal-legend')).includes('10 ημέρες · έως 2 απουσίες'), await text('.cal-legend'));
-  await win.click('button.link:has-text("Αλλαγή ποσοστού")');
-  await win.waitForSelector('#abs-pct');
+  await win.waitForSelector('#abs-hpd');
+  assert.strictEqual(await win.inputValue('#abs-hpd'), '4');
+  assert.ok((await text('#absence-card')).includes('ορίζεται σε κάθε μάθημα'));
   await win.click('button[data-action="logout"]');
   await win.waitForSelector('#lg-form');
 
   // ================================================================ teacher
-  step('teacher: «Απουσίες» — the latest day is shown; two more absences → over the limit');
+  step('teacher: «Απουσίες» — hour toggles of the latest day; a whole day → over the limit');
   await login(TEACHER.username, TEACHER.password);
   await win.waitForSelector('.tp-item');
   await win.click('#tp-tab-abs');
@@ -204,21 +221,24 @@ const text = (sel) => win.textContent(sel);
   const days = await win.$$eval('#tp-abs-date option', (o) => o.map((x) => x.value));
   assert.strictEqual(days.length, 10, 'only NAV days (not the English one)');
   assert.ok((await text('#tp-abs-date option[value="2025-10-06"]')).includes('1 απών'));
-  assert.strictEqual(await win.locator('input[data-abs]').count(), 3, 'his class only');
-  await win.check('input[data-abs="' + a.id + '"]');
-  await until(async () => (await text('tr[data-sid="' + a.id + '"] .tp-abs-cnt')).startsWith('2 / 2'), 'count after the first absence');
-  await win.selectOption('#tp-abs-date', '2025-10-16');
-  await win.waitForSelector('input[data-abs="' + a.id + '"]:not(:checked)');
-  await win.check('input[data-abs="' + a.id + '"]');
-  await until(async () => (await text('tr[data-sid="' + a.id + '"] .tp-abs-cnt')).includes('εκτός ορίου'), 'over the limit');
-  await win.check('input[data-abs="' + b.id + '"]');
-  await until(async () => (await text('tr[data-sid="' + b.id + '"] .tp-abs-cnt')).startsWith('1 / 2'), 'b at 1');
-  await win.uncheck('input[data-abs="' + b.id + '"]'); // a mistake, taken back
-  await until(async () => (await text('tr[data-sid="' + b.id + '"] .tp-abs-cnt')).startsWith('0 / 2'), 'b back to 0');
+  assert.strictEqual(await win.locator('tr[data-sid]').count(), 3, 'his class only');
+  assert.strictEqual(await win.locator('tr[data-sid="' + a.id + '"] button[data-tabs]').count(), 5, '4 hours + «όλες»');
+  assert.ok((await text('.tp-help')).includes('Όριο του μαθήματος: 5 ώρες'));
+  await win.click('tr[data-sid="' + a.id + '"] button[data-h="all"]');
+  await until(async () => (await text('tr[data-sid="' + a.id + '"] .tp-abs-cnt')).startsWith('6 / 5'), 'a whole day of absence');
+  assert.ok((await text('tr[data-sid="' + a.id + '"] .tp-abs-cnt')).includes('εκτός ορίου'));
+  await win.click('tr[data-sid="' + b.id + '"] button[data-h="2"]');
+  await until(async () => (await text('tr[data-sid="' + b.id + '"] .tp-abs-cnt')).startsWith('1 / 5'), 'b: 2nd hour');
+  await until(async () => (await win.getAttribute('tr[data-sid="' + b.id + '"] button[data-h="2"]', 'aria-pressed')) === 'true', 'toggle on');
+  await win.click('tr[data-sid="' + b.id + '"] button[data-h="2"]'); // a mistake, taken back
+  await until(async () => (await text('tr[data-sid="' + b.id + '"] .tp-abs-cnt')).startsWith('0 / 5'), 'b back to 0');
+  await win.selectOption('#tp-abs-date', '2025-10-06');
+  await win.waitForSelector('tr[data-sid="' + a.id + '"] button[data-h="1"].on');
+  assert.strictEqual(await win.locator('tr[data-sid="' + a.id + '"] button.on').count(), 2, 'the 2 hours the secretariat recorded');
   await shot('53-teacher-absences');
   saved = server.registry();
   const mine = saved.absences.filter((x) => x.src === 'teacher');
-  assert.deepStrictEqual(mine.map((x) => [x.studentId, x.date, x.by]).sort(), [[a.id, '2025-10-16', TEACHER.username], [a.id, '2025-10-17', TEACHER.username]]);
+  assert.deepStrictEqual(mine.map((x) => [x.studentId, x.date, x.hour, x.by]), [1, 2, 3, 4].map((h) => [a.id, '2025-10-17', h, TEACHER.username]));
   await win.click('#tp-logout');
   await win.waitForSelector('#lg-form');
 
@@ -230,7 +250,7 @@ const text = (sel) => win.textContent(sel);
   assert.strictEqual(await win.locator('[data-sx="start"]').count(), 0);
   const msg = await text('.ec-barred');
   assert.ok(msg.includes('You are not allowed to take this exam because of your absences.'), msg);
-  assert.ok(msg.includes('You have 3 absences in this subject and the limit is 2.'), msg);
+  assert.ok(msg.includes('You have 6 hours of absence in this subject and the limit is 5 hours.'), msg);
   assert.ok((await text('.exam-card .ec-side')).includes('Not eligible'));
   const refused = await win.evaluate(async (id) => {
     try {
@@ -242,7 +262,7 @@ const text = (sel) => win.textContent(sel);
   }, exam.id);
   assert.strictEqual(refused.status, 403);
   assert.strictEqual(refused.state, 'barred');
-  assert.ok(/because of your absences \(3 absences, limit 2\)/.test(refused.message), refused.message);
+  assert.ok(/because of your absences \(6 hours of absence, limit 5\)/.test(refused.message), refused.message);
   await shot('54-student-not-eligible');
   await win.click('[data-sx="logout"]');
   await win.waitForSelector('#lg-form');
@@ -253,18 +273,18 @@ const text = (sel) => win.textContent(sel);
   await win.waitForSelector('#lg-form');
 
   // ================================================================ admin: summary + permission
-  step('admin: summary (3 / 2 in red) and «Να γράψει» in the exam results');
+  step('admin: summary (6 / 5 in red) and «Να γράψει» in the exam results');
   await login(ADMIN, ADMIN_PW);
   await win.waitForSelector('#nav .nav-item');
   await win.click('.nav-item:has-text("Ημερολόγιο")');
   await win.waitForSelector('#cal-views');
   await win.click('#cal-views button:has-text("Απουσίες")');
   await win.waitForSelector('.abs-table');
-  assert.ok((await text('.abs-table tr:has-text("60001") .abs-cell.over')).startsWith('3/2'), await text('.abs-table tr:has-text("60001")'));
+  assert.ok((await text('.abs-table tr:has-text("60001") .abs-cell.over')).startsWith('6/5'), await text('.abs-table tr:has-text("60001")'));
   await win.click('.abs-table tr:has-text("60001") .abs-cell.over');
   await win.waitForSelector('.modal-head h2:has-text("ΑΝΤΩΝΙΟΥ ΑΝΝΑ — NAV101")');
   const list = await text('.modal-body');
-  assert.ok(list.includes('Δευτέρα 6 Οκτωβρίου 2025') && list.includes('καθηγητής ' + TEACHER.username) && list.includes('εκτός ορίου'), list);
+  assert.ok(list.includes('Δευτέρα 6 Οκτωβρίου 2025') && list.includes('4η ώρα') && list.includes('καθηγητής ' + TEACHER.username) && list.includes('6 ώρες απουσίας · όριο 5 ώρες'), list);
   await shot('55-absence-summary');
   await win.keyboard.press('Escape');
   await win.click('.nav-item:has-text("Μητρώο")');
@@ -273,7 +293,7 @@ const text = (sel) => win.textContent(sel);
   await win.click('[data-sctab="absences"]');
   await win.waitForSelector('#sc-body .table');
   const card = await text('#sc-body');
-  assert.ok(card.includes('2025-2026 · Support Morning 1 – Οκτώβριος') && card.includes('NAV101 – Βασική Ναυσιπλοΐα') && card.includes('εκτός ορίου') && card.includes('06/10/2025, 16/10/2025, 17/10/2025'), card);
+  assert.ok(card.includes('2025-2026 · Support Morning 1 – Οκτώβριος') && card.includes('NAV101 – Βασική Ναυσιπλοΐα') && card.includes('εκτός ορίου') && card.includes('06/10/2025 (1η, 2η ώρα) · 17/10/2025 (1η, 2η, 3η, 4η ώρα)'), card);
   await win.keyboard.press('Escape');
   await win.click('.nav-item:has-text("Εξετάσεις")');
   await win.waitForSelector('button[data-action="exResults"]');
@@ -284,6 +304,7 @@ const text = (sel) => win.textContent(sel);
   await shot('56-exam-results-barred');
   await win.click('tr[data-am="60001"] [data-action="exAllow"]');
   await win.waitForSelector('.modal:has-text("Άδεια συμμετοχής")');
+  assert.ok((await text('.modal:has-text("Άδεια συμμετοχής") .modal-body')).includes('6 ώρες απουσίας στο μάθημα (όριο 5 ώρες)'));
   await win.click('.modal-foot button:has-text("Να γράψει")');
   await until(async () => (await text('tr[data-am="60001"]')).includes('άδεια'), 'allowed');
   assert.ok(!(await text('tr[data-am="60001"]')).includes('Χωρίς δικαίωμα'));
@@ -293,7 +314,7 @@ const text = (sel) => win.textContent(sel);
   await win.waitForSelector('#ex-title');
   await win.waitForSelector('td.ex-abs');
   const edRow = await text('tr:has(td.am:text-is("60001"))');
-  assert.ok(edRow.includes('3 / 2') && edRow.includes('άδεια') && edRow.includes('Ανάκληση άδειας'), edRow);
+  assert.ok(edRow.includes('6 / 5') && edRow.includes('άδεια') && edRow.includes('Ανάκληση άδειας'), edRow);
   assert.strictEqual(await win.locator('#ex-over-note').count(), 0, 'nobody is left without a permission');
   await win.click('button[data-action="logout"]');
   await win.waitForSelector('#lg-form');

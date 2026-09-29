@@ -3,11 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const C = require('../src/core.js');
 
-function registry(pct) {
+// limits: absence limit (hours) of each subject by code, hpd: settings.hoursPerDay
+function registry(limits, hpd) {
   const db = C.createEmptyDb(new Date(2026, 8, 25));
   const y = db.years[0].id;
   const y2 = C.addYear(db, '2027-2028').id;
-  if (pct !== undefined) db.settings.absenceLimitPct = pct;
+  if (hpd !== undefined) db.settings.hoursPerDay = hpd;
   const st = (am, spec) => C.createStudent(db, { am, lastName: 'L' + am, firstName: 'F', specialty: spec });
   const s = {
     supDeck: st('301', 'DECK'),
@@ -49,19 +50,32 @@ function registry(pct) {
   // hand-made oddities: a second record of a day (the first counts) and a record without a subject
   db.calendar.push({ yearId: y, cls: key(s.supDeck), date: '2026-10-05', subjectId: eng.id });
   db.calendar.push({ yearId: y, cls: key(s.supDeck), date: '2026-11-11', subjectId: '' });
-  const absent = (student, dates, yr) => dates.forEach((d) => C.setAbsence(db, student.id, yr || y, d, true, { by: 'x' }));
-  absent(s.supDeck, ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-12', '2026-10-13', '2026-11-02']);
-  absent(s.supEng, ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-12', '2026-11-02', '2026-11-03', '2026-11-04']);
-  absent(s.supJan, ['2027-01-11']);
-  absent(s.olaDeck, ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08']);
-  absent(s.olaNone, ['2026-10-05']);
-  absent(s.mfDeck, ['2026-10-05', '2026-10-06']);
-  absent(s.olbEng, ['2027-05-03', '2027-05-04', '2027-05-05']);
-  absent(s.nextYear, ['2027-10-04', '2027-10-05', '2027-10-06', '2027-10-07'], y2);
-  // a second record of a day, an absence without a subject, an absence of a student without enrollment
-  db.absences.push({ studentId: s.supDeck.id, yearId: y, date: '2026-10-05', subjectId: nav.id });
-  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-09', subjectId: '' });
-  db.absences.push({ studentId: s.nowhere.id, yearId: y, date: '2026-10-05', subjectId: nav.id });
+  db.subjects.forEach((sj) => {
+    if (limits[sj.code] !== undefined) sj.absenceLimit = limits[sj.code]; // also odd values, as a hand-edited registry could have
+  });
+  // hours absent per date: a number n = hours 1…n, an array = those hours
+  const absent = (student, dates, yr) =>
+    Object.keys(dates).forEach((d) => {
+      const hs = Array.isArray(dates[d]) ? dates[d] : Array.from({ length: dates[d] }, (x, i) => i + 1);
+      C.setDayAbsences(db, student.id, yr || y, d, hs, { by: 'x' });
+    });
+  absent(s.supDeck, { '2026-10-05': 4, '2026-10-06': [2], '2026-10-07': 2, '2026-10-12': [1, 3], '2026-11-02': 1 });
+  absent(s.supEng, { '2026-10-05': 3, '2026-10-06': 4, '2026-11-02': [4], '2026-11-03': 2 });
+  absent(s.supJan, { '2027-01-11': [2] });
+  absent(s.olaDeck, { '2026-10-05': 4, '2026-10-06': 1 });
+  absent(s.olaNone, { '2026-10-05': 2 });
+  absent(s.mfDeck, { '2026-10-05': [1, 4], '2026-10-06': 1 });
+  absent(s.olbEng, { '2027-05-03': 4, '2027-05-04': [3] });
+  absent(s.nextYear, { '2027-10-04': 4, '2027-10-05': 4 }, y2);
+  // a second record of an hour (the first counts), records without a subject / without a valid hour,
+  // an old whole-day record (no hour: not counted until the app converts it), an absence of a student without enrollment
+  db.absences.push({ studentId: s.supDeck.id, yearId: y, date: '2026-10-05', hour: 1, subjectId: eng.id });
+  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-09', hour: 1, subjectId: '' });
+  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-12', hour: 0, subjectId: ola.id });
+  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-13', hour: 1.5, subjectId: ola.id });
+  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-14', hour: '2', subjectId: ola.id });
+  db.absences.push({ studentId: s.olaDeck.id, yearId: y, date: '2026-10-15', subjectId: ola.id });
+  db.absences.push({ studentId: s.nowhere.id, yearId: y, date: '2026-10-05', hour: 3, subjectId: nav.id });
   const checks = [];
   Object.values(s).forEach((student) =>
     [nav, eng, ola, olaC, mf, olb].forEach((subject) =>
@@ -85,9 +99,9 @@ const out = {
     ['MF1', 'DECK', 'AF', null],
     ['MF3', '', null, null],
   ].map((k) => ({ levelId: k[0], spec: k[1], section: k[2], period: k[3], key: C.calendarKey(k[0], k[1], k[2], k[3]) })),
-  limits: [[20, 30], [22, 30], [7, 30], [0, 30], [3, 100], [10, 0], [19, 20], [1, 99]].map(([d, p]) => [d, p, C.absenceLimit(d, p) === null ? -1 : C.absenceLimit(d, p)]),
-  pcts: [undefined, 25, 0, 100, '40', 12.5, -5, 101, null].map((v) => ({ value: v === undefined ? null : v, missing: v === undefined, pct: C.absenceLimitPct({ settings: v === undefined ? {} : { absenceLimitPct: v } }) })),
-  cases: [registry(), registry(25), registry(100)],
+  limits: [undefined, 6, 0, 12, '6', 2.5, -1, null].map((v) => ({ value: v === undefined ? null : v, missing: v === undefined, limit: C.subjectAbsenceLimit(v === undefined ? {} : { absenceLimit: v }) === null ? -1 : C.subjectAbsenceLimit({ absenceLimit: v }) })),
+  hpds: [undefined, 4, 5, 1, 12, 0, 13, '4', 3.5, null].map((v) => ({ value: v === undefined ? null : v, missing: v === undefined, hpd: C.hoursPerDay({ settings: v === undefined ? {} : { hoursPerDay: v } }) })),
+  cases: [registry({ NAV: 6, ENG: 2, OLA1: 3, OLA2: 0, MF: 2 }), registry({ NAV: 10, OLB: 4, OLA1: '3', MF: 1.5 }, 5), registry({})],
 };
 // stable output: ids by order of appearance, fixed timestamps
 const ids = new Map();

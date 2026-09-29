@@ -62,23 +62,28 @@ Syllabus entry: `{id, subjectId, name, size, uploadedAt, by, byName, byRole}`.
 
 - Dates: `validIsoDate(s)`, `isoDate(date?)` (local → "YYYY-MM-DD"), `addDays(s, n)`, `isoWeekday(s)` (0 = Sunday), `dateText(s)` ("dd/mm/yyyy"),
   `yearDateRange(db, yearId)` → `{from: "YYYY-09-01", to: "YYYY+1-08-31"}` | null
-- Limit: `DEFAULT_ABSENCE_PCT` (30), `absenceLimitPct(db)`, `setAbsenceLimitPct(db, value)` (throws Greek), `absenceLimit(days, pct)` → ⌊days·pct/100⌋ | null
+- Hours & limits: `DEFAULT_HOURS_PER_DAY` (4), `hoursPerDay(db)`, `setHoursPerDay(db, value)` (throws Greek),
+  `subjectAbsenceLimit(subject)` → hours | null, `parseAbsenceLimit(value)` → hours | null ('' = no limit; throws Greek);
+  `createSubject` / `updateSubject` take `absenceLimit`
 - Classes: `calendarKey(levelId, spec, section, period)`, `parseCalendarKey(key)`, `studentCalendarKey(db, student, yearId, enrollment?)`,
   `calendarClassName(db, yearId, key)`, `calendarClasses(db, yearId)` → `[{key, levelId, spec, section, period, name, students}]`,
   `classStudents(db, yearId, key)`, `calendarSubjects(db, yearId, key)`
-- Lookups: `attendance(db, yearId)` → `{pct, cal:{day: "cls|date"→subjectId, days: "cls|subjectId"→n}, abs:{byDay: "studentId|date"→absence, bySubject: "studentId|subjectId"→dates}}`,
-  `calendarDay(db, yearId, key, date)`, `subjectDays(db, yearId, key, subjectId)`, `getAbsence(db, studentId, yearId, date)`
+- Lookups: `attendance(db, yearId)` → `{hpd, cal:{day: "cls|date"→subjectId, days: "cls|subjectId"→n}, abs:{byDay: "studentId|date"→[hours], bySubject: "studentId|subjectId"→[{date, hour}]}}`,
+  `calendarDay(db, yearId, key, date)`, `subjectDays(db, yearId, key, subjectId)`, `absenceHours(db, studentId, yearId, date)`, `getAbsence(db, studentId, yearId, date, hour)`
 - Edits: `setCalendarDay(db, yearId, key, date, subjectId|null)` → `{changed, moved, removed}` (the day's absences follow),
   `planFill(db, yearId, key, {from, to, subjectId, weekdays, overwrite})` → `{dates, change, keep}`, `fillCalendar(…)` → `{set, kept, moved, removed}`,
-  `copyCalendar(db, yearId, fromKey, toKey, overwrite)`, `setAbsence(db, studentId, yearId, date, on, {by, src})` (throws when the class has no subject that day)
-- Status: `absenceStatus(db, student, subjectId, yearId, att?)` → `{count, days, limit, pct, over, left, dates}`,
-  `absenceSummary(db, yearId, key)` → `{pct, subjects:[{subject, days, limit}], rows:[{student, withdrawn, cells:[{count, over, dates}], total, over}]}`,
+  `copyCalendar(db, yearId, fromKey, toKey, overwrite)`, `setAbsence(db, studentId, yearId, date, hour, on, {by, src})` (throws when the class has no subject that day),
+  `setDayAbsences(db, studentId, yearId, date, hours, meta)` (exactly those hours)
+- Status: `absenceStatus(db, student, subjectId, yearId, att?)` → `{count (hours), limit, over, left, days, hours, entries:[{date, hour}], dates}`,
+  `absenceEntriesText(entries)` → `["12/11/2026 (1η, 3η ώρα)", …]`,
+  `absenceSummary(db, yearId, key)` → `{hpd, subjects:[{subject, days, limit}], rows:[{student, withdrawn, cells:[{count, over, entries}], total, over}]}`,
   `subjectDates(db, yearId, subjectId, students)` → `[{date, students}]`, `subjectAttendanceUsage(db, subjectId)` → `{days, absences}`
 
 ## Pages
-- `p-calendar.js` — «Ημερολόγιο & απουσίες» (admin): month grid per class, day dialog (subject + absent students), «Συμπλήρωση ημερών»,
-  «Αντιγραφή από τμήμα», «Απουσίες» summary (click a number: the dates, delete one). Settings: «Όριο απουσιών» card.
+- `p-calendar.js` — «Ημερολόγιο & απουσίες» (admin): month grid per class, day dialog (subject + hour toggles per student), «Συμπλήρωση ημερών»,
+  «Αντιγραφή από τμήμα», «Απουσίες» summary in hours (click a number: the days and hours, delete one). Settings: «Απουσίες» card (hours per day).
+- `p-subjects.js` — «Όριο απουσιών (ώρες)» in the subject form and table.
 - `p-exams.js` — «Απουσίες» column + «Να γράψει» / «Ανάκληση άδειας» in the results and in the assignment list (`Remote.allowAbsence(id, am, on)`).
-- `p-teacher.js` — «Βαθμοί | Απουσίες»: one day at a time (`Remote.teacherAbsences(payload)`), count / limit per student.
+- `p-teacher.js` — «Βαθμοί | Απουσίες»: one day at a time, hour toggles per student (+ «όλες»), saved at once (`Remote.teacherAbsences(payload)`), hours / limit per student.
 - `p-student.js` — a barred exam: "Not eligible" card with the absences and the limit, no Start button.
 - `p-students.js` — student card tab «Απουσίες» (per year and subject).

@@ -51,6 +51,15 @@ button.cal-day:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--
 .cal-over:hover { border-color: var(--danger); }
 .cal-leg-foot { border-top: 1px solid var(--border); line-height: 1.55; }
 
+/* ---------------------------------------------------------------- hour toggles (day dialog + teacher portal) */
+.hr-tog { display: inline-flex; align-items: center; gap: 4px; }
+.hr { min-width: 30px; height: 28px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; font-variant-numeric: tabular-nums; }
+.hr:hover { border-color: var(--danger); color: var(--danger); }
+.hr.on { background: var(--danger); border-color: var(--danger); color: #fff; }
+.hr.hr-all { margin-left: 4px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.hr.hr-all.on { background: var(--danger-soft); border-color: #f0c9c9; color: var(--danger); }
+.hr:disabled { opacity: 0.6; cursor: progress; }
+
 /* ---------------------------------------------------------------- fill dialog, day dialog */
 .cf-days { gap: 6px 14px; }
 .cd-wrap { max-height: 46vh; border: 1px solid var(--border); border-radius: var(--radius-sm); }

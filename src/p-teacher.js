@@ -159,10 +159,19 @@
       (st.over ? ' <span class="badge badge-danger" title="Πάνω από το όριο: δεν μπορεί να γράψει τις εξετάσεις του μαθήματος">εκτός ορίου</span>' : '');
   }
 
+  /** Hour toggles of a student on the shown day (1…hours per day, plus «όλες»). */
+  function hourTogglesHtml(sid, hours, hpd) {
+    const on = new Set(hours);
+    let h = '<div class="hr-tog" role="group">';
+    for (let i = 1; i <= hpd; i++) h += '<button type="button" class="hr' + (on.has(i) ? ' on' : '') + '" data-tabs="' + sid + '" data-h="' + i + '" aria-pressed="' + on.has(i) + '" title="' + i + 'η ώρα: ' + (on.has(i) ? 'απών — κλικ για παρών' : 'παρών — κλικ για απών') + '">' + i + '</button>';
+    return h + '<button type="button" class="hr hr-all' + (on.size >= hpd ? ' on' : '') + '" data-tabs="' + sid + '" data-h="all" title="Απών όλη την ημέρα / παρών">όλες</button></div>';
+  }
+
   function absencesHtml(a, sj) {
     const D = absenceDays(a);
     const att = C.attendance(T.db, a.yearId);
-    const pct = C.absenceLimitPct(T.db);
+    const hpd = att.hpd;
+    const lim = C.subjectAbsenceLimit(sj);
     let h = '<div class="card" id="tp-abs"><div class="card-head"><div><h2>' + esc(C.subjectLabel(sj)) + '</h2><div class="sub">' + esc(classLabel(a)) + ' · ' + esc(C.yearLabel(T.db, a.yearId)) + ' · ' + plural(D.all.length, 'ημέρα μαθήματος', 'ημέρες μαθήματος') + ' στο ημερολόγιο</div></div><div class="row">' + tabsHtml() + '</div></div>';
     if (!D.all.length)
       return h + '<div class="card-body">' + emptyState('calendar', 'Δεν υπάρχουν ημέρες του μαθήματος στο ημερολόγιο', 'Η γραμματεία ορίζει στο ημερολόγιο ποια ημέρα κάνει κάθε τμήμα το μάθημα. Μόλις οριστούν, θα περνάτε εδώ τις απουσίες κάθε ημέρας.') + '</div></div>';
@@ -170,6 +179,7 @@
       return h + '<div class="card-body">' + emptyState('calendar', 'Το μάθημα δεν έχει ξεκινήσει ακόμη', 'Η πρώτη ημέρα του μαθήματος είναι ' + esc(dayLabel(D.all[0].date)) + '. Απουσίες περνιούνται από την ημέρα του μαθήματος και μετά.') + '</div></div>';
     const i = D.past.indexOf(D.day);
     const absentOn = (d, list) => list.filter((s) => att.abs.byDay.has(s.id + '|' + d)).length;
+    const hoursOf = (s) => att.abs.byDay.get(s.id + '|' + D.date) || [];
     h += '<div class="tp-abs-bar"><button class="btn btn-sm btn-ghost btn-icon" data-tx="absday" data-d="' + (i > 0 ? D.past[i - 1].date : '') + '" title="Προηγούμενη ημέρα"' + (i > 0 ? '' : ' disabled') + '>' + icon('left') + '</button>' +
       '<select class="select tp-abs-date" data-tx="absdate" id="tp-abs-date">' + D.past.slice().reverse().map((x) => {
         const n = absentOn(x.date, x.students);
@@ -177,45 +187,55 @@
       }).join('') + '</select>' +
       '<button class="btn btn-sm btn-ghost btn-icon" data-tx="absday" data-d="' + (i < D.past.length - 1 ? D.past[i + 1].date : '') + '" title="Επόμενη ημέρα"' + (i < D.past.length - 1 ? '' : ' disabled') + '>' + icon('right') + '</button>' +
       '<div class="spacer"></div><span class="small muted">' + (D.all.length > D.past.length ? plural(D.all.length - D.past.length, 'ημέρα ακολουθεί', 'ημέρες ακολουθούν') : 'όλες οι ημέρες έχουν περάσει') + '</span></div>';
-    h += '<div class="table-wrap tp-wrap"><table class="table tp-table tp-abs-table"><thead><tr><th class="chk" title="Απών">Απών</th><th class="num" style="width:44px">Α/Α</th><th style="width:110px">Α.Μ.</th><th>Επώνυμο</th><th>Όνομα</th><th title="Απουσίες στο μάθημα / όριο">Απουσίες μαθήματος</th></tr></thead><tbody>';
+    h += '<div class="table-wrap tp-wrap"><table class="table tp-table tp-abs-table"><thead><tr><th class="num" style="width:44px">Α/Α</th><th style="width:100px">Α.Μ.</th><th>Επώνυμο</th><th>Όνομα</th><th title="Κλικ σε μια ώρα = απών εκείνη την ώρα">Ώρες απουσίας</th><th title="Ώρες απουσίας στο μάθημα / όριο">Σύνολο μαθήματος</th></tr></thead><tbody>';
     D.day.students.forEach((s, n) => {
-      const on = att.abs.byDay.has(s.id + '|' + D.date);
-      h += '<tr data-sid="' + s.id + '"' + (on ? ' class="absent"' : '') + '><td class="chk"><input type="checkbox" data-abs="' + s.id + '"' + (on ? ' checked' : '') + ' title="Απών/Απούσα" /></td><td class="num muted">' + (n + 1) + '</td><td class="am">' + esc(s.am) + '</td><td class="strong">' + esc(s.lastName) + '</td><td>' + esc(s.firstName) + '</td>' +
-        '<td class="tp-abs-cnt">' + absCountHtml(a, s, att) + '</td></tr>';
+      const hours = hoursOf(s);
+      h += '<tr data-sid="' + s.id + '"' + (hours.length ? ' class="absent"' : '') + '><td class="num muted">' + (n + 1) + '</td><td class="am">' + esc(s.am) + '</td><td class="strong">' + esc(s.lastName) + '</td><td>' + esc(s.firstName) + '</td>' +
+        '<td class="tp-abs-hrs">' + hourTogglesHtml(s.id, hours, hpd) + '</td><td class="tp-abs-cnt">' + absCountHtml(a, s, att) + '</td></tr>';
     });
-    h += '</tbody></table></div><div class="card-body small muted tp-help">Σημειώστε όσους <b>έλειψαν</b> — αποθηκεύεται αμέσως στο κεντρικό μητρώο και το βλέπει η γραμματεία. ' +
-      'Όριο: ' + pct + '% των ημερών του μαθήματος στο τμήμα, στρογγυλεμένο προς τα κάτω. Με περισσότερες απουσίες ο σπουδαστής <b>δεν μπορεί να γράψει</b> τις εξετάσεις του μαθήματος (εκτός αν του δώσει άδεια η γραμματεία).</div></div>';
+    h += '</tbody></table></div><div class="card-body small muted tp-help">Κάθε ημέρα έχει ' + plural(hpd, 'ώρα', 'ώρες') + '. Πατήστε την <b>ώρα</b> που έλειψε ο σπουδαστής («όλες» = όλη την ημέρα) — αποθηκεύεται αμέσως στο κεντρικό μητρώο και το βλέπει η γραμματεία. ' +
+      (lim === null ? 'Το μάθημα δεν έχει όριο απουσιών.' : 'Όριο του μαθήματος: <b>' + plural(lim, 'ώρα', 'ώρες') + '</b>. Με περισσότερες ώρες απουσίας ο σπουδαστής <b>δεν μπορεί να γράψει</b> τις εξετάσεις του μαθήματος (εκτός αν του δώσει άδεια η γραμματεία).') + '</div></div>';
     return h;
   }
 
-  async function saveAbsence(cb) {
+  /** A click on an hour toggle (or «όλες») of a student: saved right away on the server. */
+  async function saveHours(btn) {
     const a = current();
     const date = T.absDate;
-    if (!a || !date || cb.disabled) return;
-    const sid = cb.dataset.abs;
-    const on = cb.checked;
-    const tr = cb.closest('tr');
-    cb.disabled = true;
-    if (tr) tr.classList.add('saving');
+    const tr = btn.closest('tr');
+    if (!a || !date || !tr || tr.classList.contains('saving')) return;
+    const sid = btn.dataset.tabs;
+    const hpd = C.hoursPerDay(T.db);
+    const have = new Set(C.absenceHours(T.db, sid, a.yearId, date));
+    let changes;
+    if (btn.dataset.h === 'all') {
+      const full = Array.from({ length: hpd }, (x, i) => i + 1).every((h) => have.has(h));
+      changes = Array.from({ length: hpd }, (x, i) => i + 1).filter((h) => have.has(h) === full).map((h) => ({ studentId: sid, hour: h, absent: !full }));
+    } else {
+      const h = Number(btn.dataset.h);
+      changes = [{ studentId: sid, hour: h, absent: !have.has(h) }];
+    }
+    if (!changes.length) return;
+    tr.classList.add('saving');
+    tr.querySelectorAll('button[data-tabs]').forEach((x) => (x.disabled = true));
     T.busy++;
     const gen = T.gen;
     try {
-      const r = await Remote.teacherAbsences({ yearId: a.yearId, subjectId: a.subjectId, date, changes: [{ studentId: sid, absent: on }] });
+      const r = await Remote.teacherAbsences({ yearId: a.yearId, subjectId: a.subjectId, date, changes });
       if (gen !== T.gen || !T.db) return; // signed out meanwhile
       takeRev(r.rev);
-      C.setAbsence(T.db, sid, a.yearId, date, on, { by: (Remote.user || {}).username, src: 'teacher' });
-      if (tr) {
-        tr.classList.toggle('absent', on);
-        tr.querySelector('.tp-abs-cnt').innerHTML = absCountHtml(a, T.db.students.find((s) => s.id === sid) || { id: sid }, null);
-      }
+      changes.forEach((c) => C.setAbsence(T.db, sid, a.yearId, date, c.hour, c.absent, { by: (Remote.user || {}).username, src: 'teacher' }));
+      const hours = C.absenceHours(T.db, sid, a.yearId, date);
+      tr.classList.toggle('absent', hours.length > 0);
+      tr.querySelector('.tp-abs-hrs').innerHTML = hourTogglesHtml(sid, hours, hpd);
+      tr.querySelector('.tp-abs-cnt').innerHTML = absCountHtml(a, T.db.students.find((s) => s.id === sid) || { id: sid }, null);
       const opt = root().querySelector('#tp-abs-date option[value="' + date + '"]');
       if (opt) {
-        const n = root().querySelectorAll('input[data-abs]:checked').length;
+        const n = root().querySelectorAll('.tp-abs-table tr.absent').length;
         opt.textContent = dayLabel(date) + (n ? ' — ' + plural(n, 'απών', 'απόντες') : '');
       }
     } catch (e) {
       if (gen !== T.gen) return;
-      cb.checked = !on;
       toast(esc(e.message), 'error');
       if (e.status === 400 || e.status === 403) {
         // the calendar or the assignment changed meanwhile: show the current state
@@ -224,8 +244,8 @@
     } finally {
       if (gen === T.gen) {
         T.busy = Math.max(0, T.busy - 1);
-        cb.disabled = false;
-        if (tr) tr.classList.remove('saving');
+        tr.classList.remove('saving');
+        tr.querySelectorAll('button[data-tabs]').forEach((x) => (x.disabled = false));
       }
     }
   }
@@ -510,6 +530,8 @@
     T.wired = true;
     const el = root();
     el.addEventListener('click', async (e) => {
+      const hb = e.target.closest('button[data-tabs]');
+      if (hb && !hb.disabled) return saveHours(hb);
       const sb = e.target.closest('[data-syl]');
       if (sb && !sb.disabled) {
         try {
@@ -556,8 +578,7 @@
       } else if (e.target.dataset.tx === 'absdate') {
         T.absDate = e.target.value;
         render();
-      } else if (e.target.matches('input[data-abs]')) saveAbsence(e.target);
-      else if (e.target.matches('input[data-tsid]')) saveCell(e.target);
+      } else if (e.target.matches('input[data-tsid]')) saveCell(e.target);
     });
     el.addEventListener('keydown', (e) => {
       if (!e.target.matches('input[data-tsid]')) return;

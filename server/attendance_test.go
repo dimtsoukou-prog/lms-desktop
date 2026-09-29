@@ -23,12 +23,16 @@ func TestAttendanceMatchesJavaScript(t *testing.T) {
 			Period  *string `json:"period"`
 			Key     string  `json:"key"`
 		} `json:"keys"`
-		Limits [][3]int `json:"limits"`
-		Pcts   []struct {
+		Limits []struct {
 			Value   any  `json:"value"`
 			Missing bool `json:"missing"`
-			Pct     int  `json:"pct"`
-		} `json:"pcts"`
+			Limit   int  `json:"limit"`
+		} `json:"limits"`
+		Hpds []struct {
+			Value   any  `json:"value"`
+			Missing bool `json:"missing"`
+			Hpd     int  `json:"hpd"`
+		} `json:"hpds"`
 		Cases []struct {
 			Registry json.RawMessage `json:"registry"`
 			Checks   [][]any         `json:"checks"`
@@ -43,17 +47,25 @@ func TestAttendanceMatchesJavaScript(t *testing.T) {
 		}
 	}
 	for _, l := range f.Limits {
-		if got := absenceLimit(l[0], l[1]); got != l[2] {
-			t.Errorf("absenceLimit(%d, %d) = %d, js %d", l[0], l[1], got, l[2])
+		// decoded the way the registry is: {"absenceLimit": value} into regSubject
+		raw := `{}`
+		if !l.Missing {
+			b, _ := json.Marshal(map[string]any{"absenceLimit": l.Value})
+			raw = string(b)
+		}
+		var sj regSubject
+		json.Unmarshal([]byte(raw), &sj)
+		if got := subjectLimit(sj.AbsenceLimit); got != l.Limit {
+			t.Errorf("subjectLimit(%v) = %d, js %d", l.Value, got, l.Limit)
 		}
 	}
-	for _, p := range f.Pcts {
+	for _, h := range f.Hpds {
 		settings := map[string]any{}
-		if !p.Missing {
-			settings["absenceLimitPct"] = p.Value
+		if !h.Missing {
+			settings["hoursPerDay"] = h.Value
 		}
-		if got := absencePct(settings); got != p.Pct {
-			t.Errorf("absencePct(%v) = %d, js %d", p.Value, got, p.Pct)
+		if got := hoursPerDay(settings); got != h.Hpd {
+			t.Errorf("hoursPerDay(%v) = %d, js %d", h.Value, got, h.Hpd)
 		}
 	}
 	n := 0
@@ -70,7 +82,7 @@ func TestAttendanceMatchesJavaScript(t *testing.T) {
 			}
 		}
 	}
-	if n < 10 {
+	if n < 8 {
 		t.Errorf("the fixtures should hold students over the limit, got %d", n)
 	}
 }
@@ -88,14 +100,15 @@ const attendanceRegistry = `{
   {"studentId": "s2", "yearId": "y1", "levelId": "SUP", "section": "M1", "period": "OCT"},
   {"studentId": "s3", "yearId": "y1", "levelId": "SUP", "section": "M2", "period": "OCT"}
  ],
- "subjects": [{"id": "nav", "levelId": "SUP", "code": "NAV", "name": "Ναυσιπλοΐα", "specialty": "COMMON"},
+ "subjects": [{"id": "nav", "levelId": "SUP", "code": "NAV", "name": "Ναυσιπλοΐα", "specialty": "COMMON", "absenceLimit": 1},
               {"id": "eng", "levelId": "SUP", "code": "ENG", "name": "Αγγλικά", "specialty": "COMMON"}],
  "calendar": [
   {"yearId": "y1", "cls": "SUP||M1|OCT", "date": "2026-10-05", "subjectId": "nav"},
   {"yearId": "y1", "cls": "SUP||M1|OCT", "date": "2026-10-06", "subjectId": "eng"},
   {"yearId": "y1", "cls": "SUP||M2|OCT", "date": "2026-10-05", "subjectId": "nav"}
  ],
- "absences": [{"studentId": "s2", "yearId": "y1", "date": "2026-10-05", "subjectId": "nav", "by": "admin", "at": "x", "src": "admin", "note": "kept"}],
+ "absences": [{"studentId": "s2", "yearId": "y1", "date": "2026-10-05", "hour": 1, "subjectId": "nav", "by": "admin", "at": "x", "src": "admin", "note": "kept"},
+              {"studentId": "s2", "yearId": "y1", "date": "2026-10-05", "hour": 2, "subjectId": "nav", "by": "admin", "at": "x", "src": "admin"}],
  "grades": [],
  "imports": []
 }`
@@ -112,7 +125,8 @@ func TestTeacherAbsences(t *testing.T) {
 		return list
 	}
 	d := mustParse(t, attendanceRegistry)
-	stats, err := apply(d, "nav", "2026-10-05", absenceChange{"s1", true}, absenceChange{"s2", true})
+	// s2 already has hours 1 and 2 (the secretariat); the teacher adds hour 3 for s1 and hour 1 for s2 (same)
+	stats, err := apply(d, "nav", "2026-10-05", absenceChange{"s1", 3, true}, absenceChange{"s2", 1, true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,18 +134,18 @@ func TestTeacherAbsences(t *testing.T) {
 		t.Errorf("stats %v", stats)
 	}
 	list := absences(d)
-	if len(list) != 2 || list[1]["studentId"] != "s1" || list[1]["subjectId"] != "nav" || list[1]["by"] != "papas" || list[1]["src"] != "teacher" {
+	if len(list) != 3 || list[2]["studentId"] != "s1" || list[2]["hour"] != float64(3) || list[2]["subjectId"] != "nav" || list[2]["by"] != "papas" || list[2]["src"] != "teacher" {
 		t.Errorf("absences %v", list)
 	}
 	if list[0]["note"] != "kept" {
 		t.Errorf("other fields of an absence must be kept: %v", list[0])
 	}
-	// present again → removed
-	if stats, err = apply(d, "nav", "2026-10-05", absenceChange{"s2", false}, absenceChange{"s1", false}, absenceChange{"s1", false}); err != nil || stats["removed"] != 2 || stats["same"] != 1 {
+	// present again → only that hour goes
+	if stats, err = apply(d, "nav", "2026-10-05", absenceChange{"s2", 2, false}, absenceChange{"s1", 3, false}, absenceChange{"s1", 3, false}); err != nil || stats["removed"] != 2 || stats["same"] != 1 {
 		t.Errorf("remove: %v %v", stats, err)
 	}
-	if len(absences(d)) != 0 {
-		t.Errorf("absences left: %v", absences(d))
+	if l := absences(d); len(l) != 1 || l[0]["hour"] != float64(1) {
+		t.Errorf("absences left: %v", l)
 	}
 	var ae *apiError
 	fails := []struct {
@@ -140,12 +154,15 @@ func TestTeacherAbsences(t *testing.T) {
 		want                string
 		status              int
 	}{
-		{"not his subject", "eng", "2026-10-06", absenceChange{"s1", true}, "δεν σας έχει ανατεθεί", 403},
-		{"not his class", "nav", "2026-10-05", absenceChange{"s3", true}, "δεν ανήκει στα τμήματά σας", 400},
-		{"not a day of his subject", "nav", "2026-10-06", absenceChange{"s1", true}, "δεν έχει NAV Ναυσιπλοΐα", 400},
-		{"no lesson that day", "nav", "2026-10-07", absenceChange{"s1", true}, "07/10/2026", 400},
-		{"future", "nav", "2026-10-22", absenceChange{"s1", true}, "έχουν περάσει ή για σήμερα", 400},
-		{"bad date", "nav", "2026-13-01", absenceChange{"s1", true}, "Μη έγκυρη ημερομηνία", 400},
+		{"not his subject", "eng", "2026-10-06", absenceChange{"s1", 1, true}, "δεν σας έχει ανατεθεί", 403},
+		{"not his class", "nav", "2026-10-05", absenceChange{"s3", 1, true}, "δεν ανήκει στα τμήματά σας", 400},
+		{"not a day of his subject", "nav", "2026-10-06", absenceChange{"s1", 1, true}, "δεν έχει NAV Ναυσιπλοΐα", 400},
+		{"no lesson that day", "nav", "2026-10-07", absenceChange{"s1", 1, true}, "07/10/2026", 400},
+		{"future", "nav", "2026-10-22", absenceChange{"s1", 1, true}, "έχουν περάσει ή για σήμερα", 400},
+		{"bad date", "nav", "2026-13-01", absenceChange{"s1", 1, true}, "Μη έγκυρη ημερομηνία", 400},
+		{"hour 5 of 4", "nav", "2026-10-05", absenceChange{"s1", 5, true}, "Μη έγκυρη ώρα «5» (1–4)", 400},
+		{"hour 0", "nav", "2026-10-05", absenceChange{"s1", 0, true}, "Μη έγκυρη ώρα", 400},
+		{"hour 1.5", "nav", "2026-10-05", absenceChange{"s1", 1.5, true}, "Μη έγκυρη ώρα", 400},
 	}
 	for _, f := range fails {
 		_, err := apply(d, f.subject, f.date, f.ch)
@@ -153,9 +170,14 @@ func TestTeacherAbsences(t *testing.T) {
 			t.Errorf("%s: %v", f.name, err)
 		}
 	}
+	// 5 hours a day in the settings → the 5th hour is accepted
+	d = mustParse(t, strings.Replace(attendanceRegistry, `"settings": {"currentYearId": "y1"}`, `"settings": {"currentYearId": "y1", "hoursPerDay": 5}`, 1))
+	if stats, err = apply(d, "nav", "2026-10-05", absenceChange{"s1", 5, true}); err != nil || stats["added"] != 1 {
+		t.Errorf("5th hour: %v %v", stats, err)
+	}
 	// an absence recorded for another subject that day moves to the day's subject
-	d = mustParse(t, strings.Replace(attendanceRegistry, `"date": "2026-10-05", "subjectId": "nav", "by"`, `"date": "2026-10-05", "subjectId": "eng", "by"`, 1))
-	if stats, err = apply(d, "nav", "2026-10-05", absenceChange{"s2", true}); err != nil || stats["added"] != 1 || absences(d)[0]["subjectId"] != "nav" {
+	d = mustParse(t, strings.Replace(attendanceRegistry, `"hour": 1, "subjectId": "nav", "by"`, `"hour": 1, "subjectId": "eng", "by"`, 1))
+	if stats, err = apply(d, "nav", "2026-10-05", absenceChange{"s2", 1, true}); err != nil || stats["added"] != 1 || absences(d)[0]["subjectId"] != "nav" {
 		t.Errorf("retag: %v %v %v", stats, err, absences(d))
 	}
 }
@@ -175,7 +197,7 @@ func TestTeacherViewCalendar(t *testing.T) {
 	if len(got.Calendar) != 1 || got.Calendar[0].Cls != "SUP||M1|OCT" || got.Calendar[0].SubjectID != "nav" {
 		t.Errorf("calendar %+v", got.Calendar)
 	}
-	if len(got.Absences) != 1 || got.Absences[0].StudentID != "s2" {
+	if len(got.Absences) != 2 || got.Absences[0].StudentID != "s2" || got.Absences[1].Hour != 2 {
 		t.Errorf("absences %+v", got.Absences)
 	}
 	if len(got.Students) != 2 {
@@ -188,8 +210,8 @@ func TestExamAbsenceGate(t *testing.T) {
 	s := &Server{st: st}
 	nav, y1 := "nav", "y1"
 	e := &Exam{ExamMeta: ExamMeta{SubjectID: &nav, YearID: &y1}, Assignments: []Assignment{{AM: "100"}, {AM: "101"}}}
-	// Morning 1 has one NAV day: limit ⌊1 × 30 / 100⌋ = 0 → one absence is over it
-	if ab, barred := s.examBarred(e, "101"); !barred || ab.Count != 1 || ab.Days != 1 || ab.Limit != 0 {
+	// NAV has a limit of 1 hour; 101 was absent 2 hours (Morning 1 has 1 NAV day)
+	if ab, barred := s.examBarred(e, "101"); !barred || ab.Count != 2 || ab.Days != 1 || ab.Limit != 1 {
 		t.Errorf("101: %+v %v", ab, barred)
 	}
 	if _, barred := s.examBarred(e, "100"); barred {
@@ -205,12 +227,17 @@ func TestExamAbsenceGate(t *testing.T) {
 		t.Error("an exam without a subject is never checked")
 	}
 	x := s.attendance()
-	st.registry = &Registry{Rev: 8, Data: []byte(strings.Replace(attendanceRegistry, `"absences": [{`, `"settings2": {}, "absences": [{"studentId": "s1", "yearId": "y1", "date": "2026-10-05", "subjectId": "nav"}, {`, 1))}
+	st.registry = &Registry{Rev: 8, Data: []byte(strings.Replace(attendanceRegistry, `"absences": [{`, `"settings2": {}, "absences": [{"studentId": "s1", "yearId": "y1", "date": "2026-10-05", "hour": 3, "subjectId": "nav"}, {"studentId": "s1", "yearId": "y1", "date": "2026-10-05", "hour": 4, "subjectId": "nav"}, {`, 1))}
 	if s.attendance() == x {
 		t.Error("a new revision rebuilds the index")
 	}
 	if _, barred := s.examBarred(&Exam{ExamMeta: e.ExamMeta, Assignments: e.Assignments}, "100"); !barred {
-		t.Error("100 now has an absence")
+		t.Error("100 now has 2 hours of absence")
+	}
+	// no limit on the subject → never barred
+	st.registry = &Registry{Rev: 9, Data: []byte(strings.Replace(attendanceRegistry, `"specialty": "COMMON", "absenceLimit": 1}`, `"specialty": "COMMON"}`, 1))}
+	if ab, barred := s.examBarred(&Exam{ExamMeta: e.ExamMeta, Assignments: e.Assignments}, "101"); barred || ab.Limit != -1 || ab.Count != 2 {
+		t.Errorf("no limit: %+v %v", ab, barred)
 	}
 	pruneAllowed(&Exam{})
 	e.Assignments = e.Assignments[:1]
