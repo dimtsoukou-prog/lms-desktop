@@ -91,7 +91,7 @@
   function tabsHtml() {
     if (P.view === 'exam') return ''; // no syllabus while taking an exam
     const on = P.view === 'syllabus' ? 'syllabus' : 'exams';
-    const nOpen = P.list.filter((e) => e.state === 'open' || e.state === 'in_progress').length;
+    const nOpen = P.list.filter((e) => (e.state === 'open' || e.state === 'in_progress') && !e.barred).length;
     return '<nav class="sp-tabs" id="sp-tabs">' +
       '<button class="sp-tab' + (on === 'exams' ? ' on' : '') + '" id="sp-tab-exams" data-sx="tab" data-tab="exams">' + icon('clipboard', 'width="16" height="16"') + 'Exams' + (nOpen ? '<span class="count" title="Available now">' + nOpen + '</span>' : '') + '</button>' +
       '<button class="sp-tab' + (on === 'syllabus' ? ' on' : '') + '" id="sp-tab-syllabus" data-sx="tab" data-tab="syllabus">' + icon('book', 'width="16" height="16"') + 'Syllabus</button></nav>';
@@ -111,12 +111,22 @@
   }
 
   // ------------------------------------------------------------ list of exams
+  /** Too many absences in the exam's subject (and no permission from the Registrar's office): the exam cannot be started. */
+  function barredHtml(e) {
+    const n = Number(e.absences) || 0;
+    return '<div class="ec-barred">' + icon('alert') + '<div><b>You are not allowed to take this exam because of your absences.</b><br>You have ' + plural(n, 'absence', 'absences') + ' in this subject' +
+      (e.absenceLimit !== null && e.absenceLimit !== undefined ? ' and the limit is ' + e.absenceLimit : '') + '. Please contact the Registrar’s office.</div></div>';
+  }
+
   function card(e) {
     const t = Remote.now();
     const d = new Date(e.startsAt);
     let side = '';
     let cls = '';
-    if (e.state === 'open') {
+    if (e.barred) {
+      cls = ' barred';
+      side = '<span class="pill-state bad">' + icon('alert', 'width="13" height="13"') + 'Not eligible</span>' + (e.state === 'missed' ? '<div class="small muted" style="margin-top:6px">Ended</div>' : e.state === 'upcoming' ? '<div class="small muted" style="margin-top:6px">' + dateLong(e.startsAt) + ', ' + hm(e.startsAt) + '</div>' : '');
+    } else if (e.state === 'open') {
       cls = ' open';
       side = '<button class="btn btn-primary btn-lg" data-sx="start" data-id="' + e.id + '">' + icon('play') + 'Start</button><div class="small muted" style="margin-top:6px">Entry until ' + hm(e.entryClosesAt) + '</div>';
     } else if (e.state === 'in_progress') {
@@ -135,7 +145,8 @@
       '<span>' + icon('calendar', 'width="13" height="13"') + esc(dateLong(e.startsAt)) + ', ' + hm(e.startsAt) + '</span>' +
       '<span>' + icon('clock', 'width="13" height="13"') + plural(e.durationMinutes, 'minute', 'minutes') + '</span>' +
       '<span>' + icon('list', 'width="13" height="13"') + plural(e.questionCount, 'question', 'questions') + '</span></div>' +
-      (e.description && (e.state === 'open' || e.state === 'upcoming') ? '<div class="small muted" style="margin-top:6px;white-space:pre-wrap">' + esc(e.description) + '</div>' : '') +
+      (e.description && !e.barred && (e.state === 'open' || e.state === 'upcoming') ? '<div class="small muted" style="margin-top:6px;white-space:pre-wrap">' + esc(e.description) + '</div>' : '') +
+      (e.barred ? barredHtml(e) : '') +
       '</div><div class="ec-side">' + side + '</div></div>';
   }
 

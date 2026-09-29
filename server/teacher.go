@@ -66,6 +66,7 @@ type regDoc struct {
 	years       []regYear
 	grades      []map[string]any
 	settings    map[string]any
+	calendar    []regCalDay
 }
 
 func parseRegistry(data []byte) (*regDoc, error) {
@@ -84,6 +85,7 @@ func parseRegistry(data []byte) (*regDoc, error) {
 	dec("years", &d.years)
 	dec("grades", &d.grades)
 	dec("settings", &d.settings)
+	dec("calendar", &d.calendar)
 	if d.settings == nil {
 		d.settings = map[string]any{}
 	}
@@ -181,9 +183,15 @@ func (d *regDoc) teacherView(assignments []TeachAssignment) map[string]any {
 	students := map[string]bool{}
 	subjects := map[string]bool{}
 	years := map[string]bool{}
+	classes := map[string]bool{} // yearId|calendar key of the classes of his students
 	for _, a := range assignments {
-		for id := range d.members(a) {
+		members := d.members(a)
+		keys := d.studentCalKeys(a.YearID)
+		for id := range members {
 			students[id] = true
+			if k, ok := keys[id]; ok {
+				classes[a.YearID+"|"+k] = true
+			}
 		}
 		subjects[a.SubjectID] = true
 		years[a.YearID] = true
@@ -224,10 +232,17 @@ func (d *regDoc) teacherView(assignments []TeachAssignment) map[string]any {
 		"grades": filterRaw("grades", func(x map[string]any) bool {
 			return students[str(x, "studentId")] && subjects[str(x, "subjectId")]
 		}),
+		// the days of his subjects in his classes' calendars and his students' absences in them
+		"calendar": filterRaw("calendar", func(x map[string]any) bool {
+			return subjects[str(x, "subjectId")] && classes[str(x, "yearId")+"|"+str(x, "cls")]
+		}),
+		"absences": filterRaw("absences", func(x map[string]any) bool {
+			return students[str(x, "studentId")] && subjects[str(x, "subjectId")]
+		}),
 		"imports": []any{},
 	}
 	settings := map[string]any{}
-	for _, k := range []string{"sections", "levelNames", "currentYearId", "gradeLocks", "periods", "levelPeriods"} {
+	for _, k := range []string{"sections", "levelNames", "currentYearId", "gradeLocks", "periods", "levelPeriods", "absenceLimitPct"} {
 		if v, ok := d.settings[k]; ok {
 			settings[k] = v
 		}

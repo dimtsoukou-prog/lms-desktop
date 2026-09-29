@@ -17,7 +17,8 @@
   const ASSIGN_EVERY = 6; // every 6th poll (~1 min) also looks for new assignments (they do not change the registry revision)
 
   // sy: syllabus files per subjectId {files, error, loading, at} · syBusy: 'upload' | file id being opened | null
-  const T = { db: null, rev: 0, assignments: [], yearId: null, sel: null, timer: null, wired: false, busy: 0, sy: {}, syBusy: null, tick: 0, gen: 0 };
+  // tab: 'grades' | 'absences' · absDate: the day shown in «Απουσίες» ("YYYY-MM-DD", null = the latest one)
+  const T = { db: null, rev: 0, assignments: [], yearId: null, sel: null, timer: null, wired: false, busy: 0, sy: {}, syBusy: null, tick: 0, gen: 0, tab: 'grades', absDate: null };
 
   const root = () => document.getElementById('teacher-root');
   const aKey = (a) => [a.yearId, a.subjectId, a.spec || '', a.section || '', a.period || ''].join('|');
@@ -108,9 +109,14 @@
     return '<input class="input tp-grade' + (C.needsReexam(g) ? ' fail' : '') + (re ? ' has-re' : '') + '" data-tsid="' + s.id + '" value="' + esc(txt) + '" data-orig="' + esc(txt) + '"' + (lk || re ? ' disabled' : '') + (tip ? ' title="' + esc(tip) + '"' : '') + ' placeholder="—" />';
   }
 
+  function tabsHtml() {
+    return '<div class="seg tp-tabs" id="tp-tabs"><button class="' + (T.tab === 'grades' ? 'on' : '') + '" data-tx="tab" data-tab="grades">Βαθμοί</button><button class="' + (T.tab === 'absences' ? 'on' : '') + '" data-tx="tab" data-tab="absences" id="tp-tab-abs">Απουσίες</button></div>';
+  }
+
   function panelHtml(a) {
     const sj = subjectOf(a);
     if (!sj) return '<div class="card card-pad muted">Το μάθημα δεν υπάρχει πια στο μητρώο.</div>';
+    if (T.tab === 'absences') return absencesHtml(a, sj);
     const st = roster(a);
     const lk = locked(a);
     const done = st.filter((s) => hasGrade(a, s)).length;
@@ -119,7 +125,7 @@
       return g && g.re;
     }).length;
     let h = '<div class="card"><div class="card-head"><div><h2>' + esc(C.subjectLabel(sj)) + '</h2><div class="sub">' + esc(classLabel(a)) + ' · ' + esc(C.yearLabel(T.db, a.yearId)) + ' · ' + done + ' / ' + st.length + ' βαθμοί</div></div>' +
-      '<div class="row"><button class="btn" data-tx="template">' + icon('sheet') + 'Πρότυπο Excel</button><button class="btn btn-primary" data-tx="import" id="tp-import"' + (lk || !st.length ? ' disabled' : '') + '>' + icon('upload') + 'Εισαγωγή από Excel</button></div></div>';
+      '<div class="row">' + tabsHtml() + '<button class="btn" data-tx="template">' + icon('sheet') + 'Πρότυπο Excel</button><button class="btn btn-primary" data-tx="import" id="tp-import"' + (lk || !st.length ? ' disabled' : '') + '>' + icon('upload') + 'Εισαγωγή από Excel</button></div></div>';
     if (lk) h += '<div class="card-body tp-lockbar"><div class="callout warn" style="margin:0">' + icon('lock') + '<p>Η βαθμολογία του μαθήματος <b>κλείδωσε</b> από τη γραμματεία — δεν γίνονται πλέον αλλαγές. Για διόρθωση απευθυνθείτε στη γραμματεία.</p></div></div>';
     if (!st.length) return h + '<div class="card-body">' + emptyState('users', 'Δεν υπάρχουν σπουδαστές', 'Δεν υπάρχουν ακόμη εγγεγραμμένοι σπουδαστές σε αυτό το τμήμα.') + '</div></div>';
     h += '<div class="table-wrap tp-wrap"><table class="table tp-table"><thead><tr><th class="num" style="width:44px">Α/Α</th><th style="width:110px">Α.Μ.</th><th>Επώνυμο</th><th>Όνομα</th><th style="width:110px">Βαθμός</th><th></th></tr></thead><tbody>';
@@ -130,6 +136,98 @@
     h += '</tbody></table></div><div class="card-body small muted tp-help">Γράψτε τον βαθμό και πατήστε Enter — αποθηκεύεται αμέσως στο κεντρικό μητρώο. Δεκτές τιμές: <b>0, 1, 2, 3, 4, 5</b>, <b>ΑΠ</b> (απών), <b>0Δ</b> (0 λόγω δικαιολογημένων απουσιών) ή <b>0Α</b> (0 λόγω αδικαιολόγητων απουσιών). Για διαγραφή αφήστε το κελί κενό.' +
       (nRe ? '<br>' + icon('lock', 'width="12" height="12" style="vertical-align:-1px"') + ' ' + plural(nRe, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' βαθμό re-exam από τη γραμματεία — ο βαθμός τους δεν αλλάζει από εδώ.' : '') + '</div></div>';
     return h;
+  }
+
+  // ------------------------------------------------------------ absences of the selected subject (one day at a time)
+  const today = () => C.isoDate(new Date(Remote.now()));
+  const DAYS = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
+  const dayLabel = (d) => DAYS[C.isoWeekday(d)] + ' ' + C.dateText(d);
+
+  /** The days of the subject in the calendars of the teacher's classes, up to today → {all, past, date, day}. */
+  function absenceDays(a) {
+    const all = C.subjectDates(T.db, a.yearId, a.subjectId, roster(a));
+    const t = today();
+    const past = all.filter((x) => x.date <= t);
+    if (!past.some((x) => x.date === T.absDate)) T.absDate = past.length ? past[past.length - 1].date : null;
+    return { all, past, date: T.absDate, day: past.find((x) => x.date === T.absDate) || null };
+  }
+
+  function absCountHtml(a, s, att) {
+    const st = C.absenceStatus(T.db, s, a.subjectId, a.yearId, att);
+    const at = !st.over && st.limit !== null && st.count > 0 && st.count === st.limit;
+    return '<span class="tp-abs-n' + (st.over ? ' over' : at ? ' at' : '') + '">' + st.count + (st.limit !== null ? ' / ' + st.limit : '') + '</span>' +
+      (st.over ? ' <span class="badge badge-danger" title="Πάνω από το όριο: δεν μπορεί να γράψει τις εξετάσεις του μαθήματος">εκτός ορίου</span>' : '');
+  }
+
+  function absencesHtml(a, sj) {
+    const D = absenceDays(a);
+    const att = C.attendance(T.db, a.yearId);
+    const pct = C.absenceLimitPct(T.db);
+    let h = '<div class="card" id="tp-abs"><div class="card-head"><div><h2>' + esc(C.subjectLabel(sj)) + '</h2><div class="sub">' + esc(classLabel(a)) + ' · ' + esc(C.yearLabel(T.db, a.yearId)) + ' · ' + plural(D.all.length, 'ημέρα μαθήματος', 'ημέρες μαθήματος') + ' στο ημερολόγιο</div></div><div class="row">' + tabsHtml() + '</div></div>';
+    if (!D.all.length)
+      return h + '<div class="card-body">' + emptyState('calendar', 'Δεν υπάρχουν ημέρες του μαθήματος στο ημερολόγιο', 'Η γραμματεία ορίζει στο ημερολόγιο ποια ημέρα κάνει κάθε τμήμα το μάθημα. Μόλις οριστούν, θα περνάτε εδώ τις απουσίες κάθε ημέρας.') + '</div></div>';
+    if (!D.day)
+      return h + '<div class="card-body">' + emptyState('calendar', 'Το μάθημα δεν έχει ξεκινήσει ακόμη', 'Η πρώτη ημέρα του μαθήματος είναι ' + esc(dayLabel(D.all[0].date)) + '. Απουσίες περνιούνται από την ημέρα του μαθήματος και μετά.') + '</div></div>';
+    const i = D.past.indexOf(D.day);
+    const absentOn = (d, list) => list.filter((s) => att.abs.byDay.has(s.id + '|' + d)).length;
+    h += '<div class="tp-abs-bar"><button class="btn btn-sm btn-ghost btn-icon" data-tx="absday" data-d="' + (i > 0 ? D.past[i - 1].date : '') + '" title="Προηγούμενη ημέρα"' + (i > 0 ? '' : ' disabled') + '>' + icon('left') + '</button>' +
+      '<select class="select tp-abs-date" data-tx="absdate" id="tp-abs-date">' + D.past.slice().reverse().map((x) => {
+        const n = absentOn(x.date, x.students);
+        return '<option value="' + x.date + '"' + (x.date === D.date ? ' selected' : '') + '>' + esc(dayLabel(x.date)) + (n ? ' — ' + plural(n, 'απών', 'απόντες') : '') + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn btn-sm btn-ghost btn-icon" data-tx="absday" data-d="' + (i < D.past.length - 1 ? D.past[i + 1].date : '') + '" title="Επόμενη ημέρα"' + (i < D.past.length - 1 ? '' : ' disabled') + '>' + icon('right') + '</button>' +
+      '<div class="spacer"></div><span class="small muted">' + (D.all.length > D.past.length ? plural(D.all.length - D.past.length, 'ημέρα ακολουθεί', 'ημέρες ακολουθούν') : 'όλες οι ημέρες έχουν περάσει') + '</span></div>';
+    h += '<div class="table-wrap tp-wrap"><table class="table tp-table tp-abs-table"><thead><tr><th class="chk" title="Απών">Απών</th><th class="num" style="width:44px">Α/Α</th><th style="width:110px">Α.Μ.</th><th>Επώνυμο</th><th>Όνομα</th><th title="Απουσίες στο μάθημα / όριο">Απουσίες μαθήματος</th></tr></thead><tbody>';
+    D.day.students.forEach((s, n) => {
+      const on = att.abs.byDay.has(s.id + '|' + D.date);
+      h += '<tr data-sid="' + s.id + '"' + (on ? ' class="absent"' : '') + '><td class="chk"><input type="checkbox" data-abs="' + s.id + '"' + (on ? ' checked' : '') + ' title="Απών/Απούσα" /></td><td class="num muted">' + (n + 1) + '</td><td class="am">' + esc(s.am) + '</td><td class="strong">' + esc(s.lastName) + '</td><td>' + esc(s.firstName) + '</td>' +
+        '<td class="tp-abs-cnt">' + absCountHtml(a, s, att) + '</td></tr>';
+    });
+    h += '</tbody></table></div><div class="card-body small muted tp-help">Σημειώστε όσους <b>έλειψαν</b> — αποθηκεύεται αμέσως στο κεντρικό μητρώο και το βλέπει η γραμματεία. ' +
+      'Όριο: ' + pct + '% των ημερών του μαθήματος στο τμήμα, στρογγυλεμένο προς τα κάτω. Με περισσότερες απουσίες ο σπουδαστής <b>δεν μπορεί να γράψει</b> τις εξετάσεις του μαθήματος (εκτός αν του δώσει άδεια η γραμματεία).</div></div>';
+    return h;
+  }
+
+  async function saveAbsence(cb) {
+    const a = current();
+    const date = T.absDate;
+    if (!a || !date || cb.disabled) return;
+    const sid = cb.dataset.abs;
+    const on = cb.checked;
+    const tr = cb.closest('tr');
+    cb.disabled = true;
+    if (tr) tr.classList.add('saving');
+    T.busy++;
+    const gen = T.gen;
+    try {
+      const r = await Remote.teacherAbsences({ yearId: a.yearId, subjectId: a.subjectId, date, changes: [{ studentId: sid, absent: on }] });
+      if (gen !== T.gen || !T.db) return; // signed out meanwhile
+      takeRev(r.rev);
+      C.setAbsence(T.db, sid, a.yearId, date, on, { by: (Remote.user || {}).username, src: 'teacher' });
+      if (tr) {
+        tr.classList.toggle('absent', on);
+        tr.querySelector('.tp-abs-cnt').innerHTML = absCountHtml(a, T.db.students.find((s) => s.id === sid) || { id: sid }, null);
+      }
+      const opt = root().querySelector('#tp-abs-date option[value="' + date + '"]');
+      if (opt) {
+        const n = root().querySelectorAll('input[data-abs]:checked').length;
+        opt.textContent = dayLabel(date) + (n ? ' — ' + plural(n, 'απών', 'απόντες') : '');
+      }
+    } catch (e) {
+      if (gen !== T.gen) return;
+      cb.checked = !on;
+      toast(esc(e.message), 'error');
+      if (e.status === 400 || e.status === 403) {
+        // the calendar or the assignment changed meanwhile: show the current state
+        if (await load(true)) render();
+      }
+    } finally {
+      if (gen === T.gen) {
+        T.busy = Math.max(0, T.busy - 1);
+        cb.disabled = false;
+        if (tr) tr.classList.remove('saving');
+      }
+    }
   }
 
   // ------------------------------------------------------------ syllabus (Ύλη) of the selected subject
@@ -429,6 +527,13 @@
         if (act === 'password') return App.auth.changePassword(false);
         if (act === 'sel') {
           T.sel = b.dataset.k;
+          T.absDate = null;
+          render();
+        } else if (act === 'tab') {
+          T.tab = b.dataset.tab === 'absences' ? 'absences' : 'grades';
+          render();
+        } else if (act === 'absday') {
+          if (b.dataset.d) T.absDate = b.dataset.d;
           render();
         } else if (act === 'import') await importExcel();
         else if (act === 'template') await template();
@@ -446,8 +551,13 @@
         T.yearId = e.target.value;
         const mine = mineOfYear();
         T.sel = mine.length ? aKey(mine[0]) : null;
+        T.absDate = null;
         render();
-      } else if (e.target.matches('input[data-tsid]')) saveCell(e.target);
+      } else if (e.target.dataset.tx === 'absdate') {
+        T.absDate = e.target.value;
+        render();
+      } else if (e.target.matches('input[data-abs]')) saveAbsence(e.target);
+      else if (e.target.matches('input[data-tsid]')) saveCell(e.target);
     });
     el.addEventListener('keydown', (e) => {
       if (!e.target.matches('input[data-tsid]')) return;
@@ -520,6 +630,8 @@
       T.sy = {};
       T.syBusy = null;
       T.busy = 0;
+      T.tab = 'grades';
+      T.absDate = null;
       const r = root();
       if (r) r.innerHTML = '';
     },

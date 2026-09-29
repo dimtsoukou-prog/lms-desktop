@@ -15,5 +15,7 @@ Source of the UI and logic: `gmc-registry/src` (plain HTML/CSS/JS, Greek UI).
 ## Tests
 - `node test/core.test.js` — data logic.
 - `xvfb-run node test/e2e.js` — Electron E2E; `E2E_DRIVER=neu xvfb-run node test/e2e.js` — Neutralino build (browser mode).
+- `xvfb-run node test/e2e-absences.js` — calendar & absences: admin calendar, teacher absences, exam blocked over the limit, admin permission.
+- `node test/make-attendance-fixtures.js` — regenerates `test/attendance-fixtures.json` (the Go server must compute the absence limit like `src/core.js`).
 
 Data file on Windows: `%APPDATA%\GMC Maritime Academy Student Registry\data\registry.json` (+ `backups\`).

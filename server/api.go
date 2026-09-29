@@ -40,6 +40,7 @@ type Server struct {
 	logf     func(string, ...any)
 	failMu   sync.Mutex
 	failures map[string]*failure
+	att      *attIndex // calendar/absence lookups of the current registry revision (mu held)
 }
 
 type failure struct {
@@ -1295,6 +1296,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 		})
 		m["assignments"] = as
 		m["attempts"] = len(st.attempts[e.ID])
+		m["absenceAllowed"] = allowedMap(e)
 		return m, nil
 	})
 
@@ -1413,6 +1415,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 			list = append(list, Assignment{AM: am, StudentID: optString(x["studentId"], 80), Name: runeSlice(jsString(x["name"]), 120), ClassName: runeSlice(jsString(x["className"]), 120)})
 		}
 		e.Assignments = list
+		pruneAllowed(e)
 		st.saveExam(e)
 		st.addAudit(c.user.Username, "exam-assign", fmt.Sprintf("%s: %d", e.Title, len(list)))
 		return map[string]any{"assigned": len(list)}, nil
@@ -1446,6 +1449,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 		cp.CreatedAt, cp.UpdatedAt, cp.CreatedBy = t, t, c.user.Username
 		cp.Questions = append([]Question{}, e.Questions...)
 		cp.Assignments = append([]Assignment{}, e.Assignments...)
+		cp.AbsenceAllowed = nil // permissions are given per exam
 		st.saveCounters()
 		st.saveExam(&cp)
 		st.exams[cp.ID] = &cp
@@ -1510,6 +1514,17 @@ func (s *Server) routes(mux *http.ServeMux) {
 			m := row(as.AM, atts[as.AM])
 			delete(atts, as.AM)
 			m["studentId"], m["name"], m["className"] = as.StudentID, as.Name, as.ClassName
+			// absences in the exam's subject: over the limit → cannot start unless the admin allows it
+			if ab, ok := s.examAbsences(e, as.AM); ok {
+				m["absences"], m["absenceDays"], m["overLimit"] = ab.Count, ab.Days, ab.Over
+				if ab.Limit >= 0 {
+					m["absenceLimit"] = ab.Limit
+				} else {
+					m["absenceLimit"] = nil
+				}
+			}
+			_, allowed := e.AbsenceAllowed[as.AM]
+			m["absenceAllowed"] = allowed
 			rows = append(rows, m)
 		}
 		// attempts of students no longer assigned are still reported
@@ -1521,6 +1536,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 		meta := examMetaJSON(e)
 		meta["questionCount"] = len(e.Questions)
 		meta["phase"] = ph.Phase
+		meta["absenceCheck"] = e.SubjectID != nil && *e.SubjectID != "" && e.YearID != nil && *e.YearID != ""
 		return map[string]any{"exam": meta, "questions": e.Questions, "rows": rows, "serverNow": t}, nil
 	})
 
@@ -1585,7 +1601,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 		sort.Slice(list, func(i, j int) bool { return list[i].StartsAt < list[j].StartsAt })
 		out := []map[string]any{}
 		for _, e := range list {
-			out = append(out, s.studentExamView(e, st.attempts[e.ID][am], t))
+			a := st.attempts[e.ID][am]
+			v := s.studentExamView(e, a, t)
+			if a == nil {
+				if ab, barred := s.examBarred(e, am); barred {
+					v["barred"], v["absences"], v["absenceLimit"] = true, ab.Count, ab.Limit
+				}
+			}
+			out = append(out, v)
 		}
 		return map[string]any{"exams": out, "serverNow": t, "user": publicUser(c.user)}, nil
 	})
@@ -1612,6 +1635,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		if ph.Phase == "closed" {
 			return nil, conflictEn("Έληξε ο χρόνος εισόδου στην εξέταση.", "The entry time for this exam has passed.", map[string]any{"state": "missed"})
+		}
+		if ab, barred := s.examBarred(e, am); barred {
+			st.addAudit(c.user.Username, "exam-barred", e.Title)
+			return nil, errBarred(ab)
 		}
 		order := makeOrder(e.Questions, e.ShuffleQuestions, e.ShuffleOptions)
 		a := &Attempt{ExamID: e.ID, AM: am, UserID: c.user.ID, StartedAt: t, Deadline: t + int64(e.DurationMinutes)*60000, Answers: map[string]any{}, Order: &order, Status: "in_progress", IP: c.ip}
@@ -1696,6 +1723,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	})
 
 	s.syllabusRoutes(mux)
+	s.attendanceRoutes(mux)
 
 	if s.cfg.TestMode {
 		// only for the automatic tests: make running attempts of an exam run out of time

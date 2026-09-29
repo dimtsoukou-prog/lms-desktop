@@ -234,6 +234,8 @@
     teacherData: () => request('GET', '/api/teacher/data', undefined, { timeout: 60000 }),
     teacherRev: () => request('GET', '/api/teacher/rev', undefined, { timeout: 8000 }),
     teacherGrades: (payload) => request('POST', '/api/teacher/grades', payload, { timeout: 30000 }),
+    /** {yearId, subjectId, date: "YYYY-MM-DD", changes:[{studentId, absent}]} → {rev, stats:{added, removed, same}} */
+    teacherAbsences: (payload) => request('POST', '/api/teacher/absences', payload, { timeout: 30000 }),
 
     // ---------------------------------------------------------------- exams (admin)
     exams: () => request('GET', '/api/exams'),
@@ -247,6 +249,8 @@
     examResults: (id) => request('GET', '/api/exams/' + id + '/results'),
     examResult: (id, am) => request('GET', '/api/exams/' + id + '/results/' + encodeURIComponent(am)),
     resetAttempt: (id, am) => request('POST', '/api/exams/' + id + '/attempts/' + encodeURIComponent(am) + '/reset', {}),
+    /** The admin lets a student over the absence limit take this exam (allowed = false takes it back) → {absenceAllowed} */
+    allowAbsence: (id, am, allowed) => request('POST', '/api/exams/' + id + '/absence-allow', { am, allowed: !!allowed }),
 
     // ---------------------------------------------------------------- the student's own exams
     myExams: () => request('GET', '/api/my/exams'),

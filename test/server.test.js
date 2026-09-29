@@ -612,6 +612,105 @@ t('syllabus: PDFs per subject — admin/assigned teacher upload & delete, studen
   assert.ok(audit.includes('syllabus-upload') && audit.includes('syllabus-delete'));
 });
 
+t('absences: class calendar, a teacher records a day, over the limit → the exam cannot start until the admin allows it', async () => {
+  const C = require('../src/core.js');
+  const cur = (await call('GET', '/api/registry', undefined, adminToken)).data;
+  const db = C.normalizeDb(cur.data);
+  const y = (db.years.find((x) => x.label === '2019-2020') || C.addYear(db, '2019-2020')).id; // a past year: every day of it can hold absences
+  const mk = (am, ln, sec) => {
+    const st = C.createStudent(db, { am, lastName: ln, firstName: 'Α', specialty: 'DECK' });
+    C.setEnrollment(db, st.id, y, 'SUP', sec, 'OCT');
+    return st;
+  };
+  const s1 = mk('75001', 'ΠΡΩΤΟΣ', 'M1');
+  const s2 = mk('75002', 'ΔΕΥΤΕΡΟΣ', 'M1');
+  const s3 = mk('75003', 'ΤΡΙΤΟΣ', 'M2');
+  const nav = C.createSubject(db, { levelId: 'SUP', code: 'A-NAV', name: 'Ναυσιπλοΐα Α' });
+  const eng = C.createSubject(db, { levelId: 'SUP', code: 'A-ENG', name: 'Αγγλικά Α' });
+  const M1 = C.studentCalendarKey(db, s1, y);
+  C.fillCalendar(db, y, M1, { from: '2019-10-07', to: '2019-10-11', subjectId: nav.id }); // 5 days → limit ⌊5 × 30%⌋ = 1
+  C.setCalendarDay(db, y, M1, '2019-10-14', eng.id);
+  C.fillCalendar(db, y, C.studentCalendarKey(db, s3, y), { from: '2019-10-07', to: '2019-10-11', subjectId: nav.id });
+  C.setAbsence(db, s2.id, y, '2019-10-07', true, { by: 'admin' }); // the secretariat: 1 = at the limit
+  let r = await call('PUT', '/api/registry', { baseRev: cur.rev, data: db }, adminToken);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+
+  // a teacher of NAV for Morning 1 records two days of absences of 75001
+  r = await call('POST', '/api/users/teachers', { username: 'kalou', name: 'Καλού Μαρία', password: 'Teach-2028' }, adminToken);
+  await call('PUT', '/api/users/' + r.data.id + '/assignments', { assignments: [{ yearId: y, subjectId: nav.id, section: 'M1' }] }, adminToken);
+  const tt = (await login('kalou', 'Teach-2028')).token;
+  r = await call('GET', '/api/teacher/data', undefined, tt);
+  assert.strictEqual(r.data.data.calendar.length, 5, 'only the NAV days of Morning 1');
+  assert.deepStrictEqual(r.data.data.absences.map((a) => a.date), ['2019-10-07']);
+  const abs = (date, changes) => call('POST', '/api/teacher/absences', { yearId: y, subjectId: nav.id, date, changes }, tt);
+  r = await abs('2019-10-07', [{ studentId: s1.id, absent: true }, { studentId: s2.id, absent: true }]);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  assert.deepStrictEqual(r.data.stats, { added: 1, removed: 0, same: 1 });
+  r = await abs('2019-10-08', [{ studentId: s1.id, absent: true }]);
+  assert.strictEqual(r.data.stats.added, 1);
+  const rev = r.data.rev;
+  r = await abs('2019-10-08', [{ studentId: s1.id, absent: true }]);
+  assert.deepStrictEqual([r.data.rev, r.data.stats.same], [rev, 1], 'nothing changed → no new revision');
+  assert.strictEqual((await abs('2019-10-08', [{ studentId: s3.id, absent: true }])).status, 400, 'not his class');
+  r = await abs('2019-10-14', [{ studentId: s1.id, absent: true }]);
+  assert.strictEqual(r.status, 400, 'an English day');
+  assert.ok(/δεν έχει A-NAV/.test(r.data.error), r.data.error);
+  assert.strictEqual((await abs(C.addDays(C.isoDate(), 3), [{ studentId: s1.id, absent: true }])).status, 400, 'future');
+  assert.strictEqual((await call('POST', '/api/teacher/absences', { yearId: y, subjectId: eng.id, date: '2019-10-14', changes: [{ studentId: s1.id, absent: true }] }, tt)).status, 403);
+  const reg = C.normalizeDb((await call('GET', '/api/registry', undefined, adminToken)).data.data);
+  assert.deepStrictEqual(C.absenceStatus(reg, s1, nav.id, y), { count: 2, days: 5, limit: 1, pct: 30, over: true, left: -1, dates: ['2019-10-07', '2019-10-08'] });
+  assert.strictEqual(C.getAbsence(reg, s1.id, y, '2019-10-07').src, 'teacher');
+  assert.strictEqual(C.getAbsence(reg, s1.id, y, '2019-10-07').by, 'kalou');
+
+  // an exam of NAV (that year), open now, for 75001 (over) and 75002 (at the limit)
+  const pw = {};
+  (await call('POST', '/api/users/students', { students: [{ am: '75001', name: 'ΠΡΩΤΟΣ' }, { am: '75002', name: 'ΔΕΥΤΕΡΟΣ' }] }, adminToken)).data.results.forEach((x) => (pw[x.am] = x.password));
+  r = await call('POST', '/api/exams', { title: 'Πρόοδος Α-NAV', subjectId: nav.id, subjectName: 'A-NAV', yearId: y, startsAt: Date.now() - 5000, durationMinutes: 10, entryMinutes: 5, questions: [{ type: 'tf', text: 'Ερώτηση', answer: true }] }, adminToken);
+  const id = r.data.id;
+  await call('PUT', '/api/exams/' + id + '/assignments', { students: [{ am: '75001', studentId: s1.id, name: 'ΠΡΩΤΟΣ' }, { am: '75002', studentId: s2.id, name: 'ΔΕΥΤΕΡΟΣ' }] }, adminToken);
+  assert.strictEqual((await call('POST', '/api/exams/' + id + '/publish', { published: true }, adminToken)).status, 200);
+  const t1 = (await login('75001', pw['75001'])).token;
+  const t2 = (await login('75002', pw['75002'])).token;
+  const en = { 'X-Lang': 'en' };
+  r = await call('GET', '/api/my/exams', undefined, t1);
+  let ex = r.data.exams.find((x) => x.id === id);
+  assert.deepStrictEqual([ex.state, ex.barred, ex.absences, ex.absenceLimit], ['open', true, 2, 1]);
+  r = await call('POST', '/api/my/exams/' + id + '/start', {}, t1, en);
+  assert.strictEqual(r.status, 403);
+  assert.deepStrictEqual([r.data.state, r.data.code, r.data.absences, r.data.absenceLimit], ['barred', 'absences', 2, 1]);
+  assert.strictEqual(r.data.error, 'You are not allowed to take this exam because of your absences (2 absences, limit 1). Please contact the Registrar’s office.');
+  assert.strictEqual(app.attempts(id).length, 0);
+  ex = (await call('GET', '/api/my/exams', undefined, t2)).data.exams.find((x) => x.id === id);
+  assert.ok(!ex.barred, 'at the limit: allowed');
+  assert.strictEqual((await call('POST', '/api/my/exams/' + id + '/start', {}, t2)).status, 200);
+
+  // the admin sees it in the results and allows 75001 by hand
+  r = await call('GET', '/api/exams/' + id + '/results', undefined, adminToken);
+  const row = (am) => r.data.rows.find((x) => x.am === am);
+  assert.deepStrictEqual([row('75001').absences, row('75001').absenceLimit, row('75001').absenceDays, row('75001').overLimit, row('75001').absenceAllowed], [2, 1, 5, true, false]);
+  assert.deepStrictEqual([row('75002').absences, row('75002').overLimit], [1, false]);
+  assert.strictEqual(r.data.exam.absenceCheck, true);
+  assert.strictEqual((await call('POST', '/api/exams/' + id + '/absence-allow', { am: '79999', allowed: true }, adminToken)).status, 400, 'not assigned');
+  assert.strictEqual((await call('POST', '/api/exams/' + id + '/absence-allow', { am: '75001', allowed: true }, t1)).status, 403, 'students cannot');
+  r = await call('POST', '/api/exams/' + id + '/absence-allow', { am: '75001', allowed: true }, adminToken);
+  assert.strictEqual(r.data.absenceAllowed['75001'].by, 'admin');
+  assert.strictEqual((await call('GET', '/api/exams/' + id, undefined, adminToken)).data.absenceAllowed['75001'].by, 'admin');
+  ex = (await call('GET', '/api/my/exams', undefined, t1)).data.exams.find((x) => x.id === id);
+  assert.ok(!ex.barred);
+  r = await call('POST', '/api/my/exams/' + id + '/start', {}, t1);
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  r = await call('GET', '/api/exams/' + id + '/results', undefined, adminToken);
+  assert.strictEqual(row('75001').absenceAllowed, true);
+  // a copy of the exam starts without permissions; an unassigned student loses his
+  r = await call('POST', '/api/exams/' + id + '/duplicate', {}, adminToken);
+  assert.deepStrictEqual((await call('GET', '/api/exams/' + r.data.id, undefined, adminToken)).data.absenceAllowed, {});
+  await call('POST', '/api/exams/' + r.data.id + '/absence-allow', { am: '75002', allowed: true }, adminToken);
+  await call('PUT', '/api/exams/' + r.data.id + '/assignments', { students: [{ am: '75001' }] }, adminToken);
+  assert.deepStrictEqual((await call('GET', '/api/exams/' + r.data.id, undefined, adminToken)).data.absenceAllowed, {});
+  r = await call('POST', '/api/exams/' + id + '/absence-allow', { am: '75001', allowed: false }, adminToken);
+  assert.deepStrictEqual(r.data.absenceAllowed, {});
+});
+
 t('English error texts for the student portal (X-Lang: en), CORS headers, version', async () => {
   const en = { 'X-Lang': 'en' };
   let r = await call('POST', '/api/login', { username: '72001', password: 'wrong-one' }, null, en);

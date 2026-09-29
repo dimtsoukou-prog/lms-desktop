@@ -473,6 +473,8 @@
       subjects: [],
       grades: [],
       imports: [],
+      calendar: [],
+      absences: [],
     };
   }
 
@@ -491,7 +493,7 @@
     out.settings.periods = clonePeriods(validPeriodList(out.settings.periods) ? out.settings.periods : DEFAULT_PERIODS);
     out.settings.levelPeriods = cleanLevelPeriods(out.settings.levelPeriods, out.settings.periods);
     usePeriods(out.settings);
-    ['years', 'students', 'enrollments', 'subjects', 'grades', 'imports'].forEach((k) => {
+    ['years', 'students', 'enrollments', 'subjects', 'grades', 'imports', 'calendar', 'absences'].forEach((k) => {
       if (!Array.isArray(out[k])) out[k] = [];
     });
     fillSinglePeriods(out);
@@ -840,6 +842,7 @@
     db.students = db.students.filter((s) => s.id !== id);
     db.enrollments = db.enrollments.filter((e) => e.studentId !== id);
     db.grades = db.grades.filter((g) => g.studentId !== id);
+    db.absences = (db.absences || []).filter((a) => a && a.studentId !== id);
   }
 
   // --------------------------------------------------------- enrollments
@@ -1492,6 +1495,431 @@
     const o = sj ? teachingClassOptions(db, sj).find((x) => x.spec === (a.spec || '') && x.section === (a.section || '')) : null;
     if (!o) return a.label || '';
     return o.label + (a.period ? ' – ' + periodName(a.period) : '');
+  }
+
+  // --------------------------------------------------------- calendar & absences
+  /*
+   * Teaching calendar per class (τμήμα), one subject per day:
+   *   db.calendar = [{yearId, cls, date, subjectId}]      cls = calendarKey(…), date = "YYYY-MM-DD"
+   * Absences, one per student per day, for the subject his class has that day:
+   *   db.absences = [{studentId, yearId, date, subjectId, by, at, src: 'admin' | 'teacher'}]
+   * Limit of a subject = settings.absenceLimitPct (default 30) % of its days in the student's class
+   * calendar, rounded down (20 days → 6). Every absence counts. More absences than the limit → the
+   * student may not start the exams of that subject, unless the admin allowed it for that exam.
+   * server/attendance.go mirrors calendarKey / absenceLimit / absenceStatus (test/attendance-fixtures.json).
+   */
+  const DEFAULT_ABSENCE_PCT = 30;
+  const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  /** A real calendar date written "YYYY-MM-DD". */
+  function validIsoDate(s) {
+    const m = ISO_DATE_RE.exec(typeof s === 'string' ? s : '');
+    if (!m) return false;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+  }
+
+  /** A local date (default: today) → "YYYY-MM-DD". */
+  function isoDate(d) {
+    const x = d || new Date();
+    return x.getFullYear() + '-' + pad2(x.getMonth() + 1) + '-' + pad2(x.getDate());
+  }
+
+  function isoUtc(s) {
+    const m = ISO_DATE_RE.exec(s);
+    return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  }
+
+  /** "YYYY-MM-DD" moved by n days. */
+  function addDays(s, n) {
+    const d = new Date(isoUtc(s) + n * 86400000);
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+  }
+
+  /** Day of the week of "YYYY-MM-DD": 0 = Sunday … 6 = Saturday. */
+  function isoWeekday(s) {
+    return new Date(isoUtc(s)).getUTCDay();
+  }
+
+  /** "2026-11-12" → "12/11/2026" */
+  function dateText(s) {
+    const m = ISO_DATE_RE.exec(s || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : String(s || '');
+  }
+
+  /** First and last day of an academic year ("2026-2027" → 2026-09-01 … 2027-08-31); null when the label is not a year. */
+  function yearDateRange(db, yearId) {
+    const y = db.years.find((x) => x.id === yearId);
+    const p = y ? parseYearLabel(y.label) : null;
+    return p ? { from: p.start + '-09-01', to: p.end + '-08-31' } : null;
+  }
+
+  function checkYearDate(db, yearId, date) {
+    if (!validIsoDate(date)) throw new Error('Μη έγκυρη ημερομηνία «' + date + '».');
+    const r = yearDateRange(db, yearId);
+    if (r && (date < r.from || date > r.to))
+      throw new Error('Η ημερομηνία ' + dateText(date) + ' δεν ανήκει στο ακαδημαϊκό έτος ' + yearLabel(db, yearId) + ' (' + dateText(r.from) + ' – ' + dateText(r.to) + ').');
+  }
+
+  /** The absence limit in % of a subject's days (settings.absenceLimitPct: an integer 0–100, default 30). */
+  function absenceLimitPct(db) {
+    const v = db && db.settings ? db.settings.absenceLimitPct : undefined;
+    return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100 ? v : DEFAULT_ABSENCE_PCT;
+  }
+
+  function setAbsenceLimitPct(db, value) {
+    const t = String(value === undefined || value === null ? '' : value).trim().replace('%', '').replace(',', '.').trim();
+    const n = Number(t);
+    if (!t || !Number.isInteger(n) || n < 0 || n > 100) throw new Error('Το όριο απουσιών είναι ποσοστό: ακέραιος από 0 έως 100.');
+    db.settings.absenceLimitPct = n;
+    return n;
+  }
+
+  /** Absences allowed in a subject with `days` days in the calendar: ⌊days × pct / 100⌋ (null without days). */
+  function absenceLimit(days, pct) {
+    return days > 0 ? Math.floor((days * pct) / 100) : null;
+  }
+
+  /**
+   * Key of a class in the calendar: "levelId|spec|section|period" ('' = none). Support: no specialty
+   * (Deck & Engine together) · Management: no section (the whole class has the year's shift).
+   */
+  function calendarKey(levelId, spec, section, period) {
+    const sp = isUnifiedLevel(levelId) || !hasSpec(spec) ? '' : spec;
+    const sec = isShiftLevel(levelId) ? '' : section || '';
+    return [levelId || '', sp, sec, period || ''].join('|');
+  }
+
+  function parseCalendarKey(key) {
+    const p = String(key || '').split('|');
+    return { levelId: p[0] || '', spec: p[1] || null, section: p[2] || null, period: p[3] || null };
+  }
+
+  /** The calendar key of a student's class in a year (null when he is not enrolled). */
+  function studentCalendarKey(db, student, yearId, enrollment) {
+    const en = enrollment === undefined ? getEnrollment(db, student.id, yearId) : enrollment;
+    return en ? calendarKey(en.levelId, student.specialty, en.section, en.period) : null;
+  }
+
+  /** "Support Morning 1 – Οκτώβριος", "Management Deck Function 1 Afternoon" … */
+  function calendarClassName(db, yearId, key) {
+    const k = parseCalendarKey(key);
+    const shift = isShiftLevel(k.levelId);
+    const sec = shift ? (k.spec ? getMgmtShift(db, yearId, k.levelId, k.spec) : null) : k.section;
+    return classFullName(db, k.levelId, k.spec, sec, classPeriod(db, k.levelId, k.period)) + (!shift && !k.section ? ' (χωρίς τμήμα)' : '');
+  }
+
+  /**
+   * The classes of a year for the calendar: every class with enrolled students plus classes that only
+   * have calendar days → [{key, levelId, spec, section, period, name, students:[student]}] in class order.
+   */
+  function calendarClasses(db, yearId) {
+    const byId = new Map(db.students.map((s) => [s.id, s]));
+    const map = new Map();
+    const add = (key) => {
+      if (!map.has(key)) {
+        const k = parseCalendarKey(key);
+        map.set(key, { key, levelId: k.levelId, spec: k.spec, section: k.section, period: k.period, name: calendarClassName(db, yearId, key), students: [] });
+      }
+      return map.get(key);
+    };
+    const seen = new Set();
+    db.enrollments.forEach((en) => {
+      const st = byId.get(en.studentId);
+      if (en.yearId !== yearId || !st || seen.has(st.id)) return;
+      seen.add(st.id);
+      add(studentCalendarKey(db, st, yearId, en)).students.push(st);
+    });
+    (db.calendar || []).forEach((d) => d && d.yearId === yearId && typeof d.cls === 'string' && add(d.cls));
+    const specRank = (s) => (s === 'DECK' ? 0 : s === 'ENGINE' ? 1 : 2);
+    const out = Array.from(map.values()).filter((c) => LEVEL_IDS.includes(c.levelId));
+    out.forEach((c) => (c.students = sortStudents(c.students)));
+    return out.sort(
+      (a, b) =>
+        LEVEL_IDS.indexOf(a.levelId) - LEVEL_IDS.indexOf(b.levelId) ||
+        specRank(a.spec) - specRank(b.spec) ||
+        periodIndex(a.period) - periodIndex(b.period) ||
+        sectionIndex(a.levelId, a.section) - sectionIndex(b.levelId, b.section)
+    );
+  }
+
+  /** The students of a calendar class (sorted by name). */
+  function classStudents(db, yearId, key) {
+    const byId = new Map(db.students.map((s) => [s.id, s]));
+    const out = [];
+    const seen = new Set();
+    db.enrollments.forEach((en) => {
+      const st = byId.get(en.studentId);
+      if (en.yearId !== yearId || !st || seen.has(st.id)) return;
+      seen.add(st.id);
+      if (studentCalendarKey(db, st, yearId, en) === key) out.push(st);
+    });
+    return sortStudents(out);
+  }
+
+  /** Subjects a class can have in its calendar: its level's subjects for its specialty (active, plus inactive ones already in it). */
+  function calendarSubjects(db, yearId, key) {
+    const k = parseCalendarKey(key);
+    const used = new Set((db.calendar || []).filter((d) => d && d.yearId === yearId && d.cls === key).map((d) => d.subjectId));
+    return subjectsOfLevel(db, k.levelId).filter((s) => subjectApplies(s, k.spec || 'ALL') && (s.active !== false || used.has(s.id)));
+  }
+
+  /**
+   * The calendar and the absences of a year as lookups (the first record of a day counts):
+   * cal.day "cls|date" → subjectId · cal.days "cls|subjectId" → days ·
+   * abs.byDay "studentId|date" → absence · abs.bySubject "studentId|subjectId" → sorted dates.
+   */
+  function attendance(db, yearId) {
+    const day = new Map();
+    const days = new Map();
+    (db.calendar || []).forEach((d) => {
+      if (!d || d.yearId !== yearId || !d.subjectId) return;
+      const k = d.cls + '|' + d.date;
+      if (day.has(k)) return;
+      day.set(k, d.subjectId);
+      const n = d.cls + '|' + d.subjectId;
+      days.set(n, (days.get(n) || 0) + 1);
+    });
+    const byDay = new Map();
+    const bySubject = new Map();
+    (db.absences || []).forEach((a) => {
+      if (!a || a.yearId !== yearId) return;
+      const k = a.studentId + '|' + a.date;
+      if (byDay.has(k)) return;
+      byDay.set(k, a);
+      if (!a.subjectId) return;
+      const s = a.studentId + '|' + a.subjectId;
+      if (!bySubject.has(s)) bySubject.set(s, []);
+      bySubject.get(s).push(a.date);
+    });
+    bySubject.forEach((l) => l.sort());
+    return { yearId, pct: absenceLimitPct(db), cal: { day, days }, abs: { byDay, bySubject } };
+  }
+
+  /** The calendar record of a class on a day, or null. */
+  function calendarDay(db, yearId, key, date) {
+    return (db.calendar || []).find((d) => d && d.yearId === yearId && d.cls === key && d.date === date && d.subjectId) || null;
+  }
+
+  /** Days of a subject in a class calendar. */
+  function subjectDays(db, yearId, key, subjectId) {
+    return attendance(db, yearId).cal.days.get(key + '|' + subjectId) || 0;
+  }
+
+  /**
+   * Set (subjectId) or clear (null) one day of a class calendar. The absences of the class's students
+   * on that day follow: they move to the new subject, or are deleted when the day is cleared.
+   * → {changed, moved, removed}
+   */
+  function setCalendarDay(db, yearId, key, date, subjectId) {
+    checkYearDate(db, yearId, date);
+    const sid = subjectId || null;
+    if (sid && !db.subjects.some((s) => s.id === sid)) throw new Error('Το μάθημα δεν βρέθηκε.');
+    db.calendar = db.calendar || [];
+    const same = (d) => d && d.yearId === yearId && d.cls === key && d.date === date;
+    const cur = db.calendar.find(same) || null;
+    if ((cur ? cur.subjectId || null : null) === sid) return { changed: false, moved: 0, removed: 0 };
+    db.calendar = db.calendar.filter((d) => !same(d));
+    if (sid) db.calendar.push({ yearId, cls: key, date, subjectId: sid });
+    const ids = new Set(classStudents(db, yearId, key).map((s) => s.id));
+    let moved = 0;
+    let removed = 0;
+    db.absences = (db.absences || []).filter((a) => {
+      if (!a || a.yearId !== yearId || a.date !== date || !ids.has(a.studentId)) return true;
+      if (!sid) {
+        removed++;
+        return false;
+      }
+      if (a.subjectId !== sid) {
+        a.subjectId = sid;
+        moved++;
+      }
+      return true;
+    });
+    return { changed: true, moved, removed };
+  }
+
+  /** Days of a range that fillCalendar would change: {dates, change, keep} (weekdays: 0 = Sunday … 6). */
+  function planFill(db, yearId, key, opts) {
+    const o = opts || {};
+    if (!validIsoDate(o.from) || !validIsoDate(o.to)) throw new Error('Ορίστε έγκυρες ημερομηνίες «Από» και «Έως».');
+    if (o.to < o.from) throw new Error('Η ημερομηνία «Έως» είναι πριν από την «Από».');
+    checkYearDate(db, yearId, o.from);
+    checkYearDate(db, yearId, o.to);
+    const wd = new Set(Array.isArray(o.weekdays) ? o.weekdays : [1, 2, 3, 4, 5]);
+    const sid = o.subjectId || null;
+    if (sid && !calendarSubjects(db, yearId, key).some((s) => s.id === sid)) throw new Error('Το μάθημα δεν ανήκει σε αυτό το τμήμα.');
+    const A = attendance(db, yearId);
+    const out = { dates: [], change: 0, keep: 0 };
+    for (let d = o.from; d <= o.to; d = addDays(d, 1)) {
+      if (!wd.has(isoWeekday(d))) continue;
+      const cur = A.cal.day.get(key + '|' + d) || null;
+      if (cur === sid) continue;
+      if (sid && cur && !o.overwrite) {
+        out.keep++;
+        continue;
+      }
+      out.dates.push(d);
+      out.change++;
+    }
+    return out;
+  }
+
+  /**
+   * Put one subject on a range of days of a class calendar (or clear them: subjectId null).
+   * opts: {from, to, weekdays, overwrite} — days that already have another subject are kept unless overwrite.
+   * → {set, kept, moved, removed}
+   */
+  function fillCalendar(db, yearId, key, opts) {
+    const plan = planFill(db, yearId, key, opts);
+    const r = { set: 0, kept: plan.keep, moved: 0, removed: 0 };
+    plan.dates.forEach((d) => {
+      const x = setCalendarDay(db, yearId, key, d, opts.subjectId || null);
+      if (x.changed) r.set++;
+      r.moved += x.moved;
+      r.removed += x.removed;
+    });
+    return r;
+  }
+
+  /** Copy the days of another class calendar of the same year (subjects the class does not have are skipped). */
+  function copyCalendar(db, yearId, fromKey, toKey, overwrite) {
+    if (fromKey === toKey) throw new Error('Επιλέξτε άλλο τμήμα.');
+    const ok = new Set(calendarSubjects(db, yearId, toKey).map((s) => s.id));
+    const A = attendance(db, yearId);
+    const r = { set: 0, kept: 0, skipped: 0, moved: 0, removed: 0 };
+    const src = [];
+    A.cal.day.forEach((sid, k) => {
+      if (k.slice(0, -11) === fromKey) src.push({ date: k.slice(-10), sid });
+    });
+    src.sort((a, b) => (a.date < b.date ? -1 : 1)).forEach(({ date, sid }) => {
+      if (!ok.has(sid)) return void r.skipped++;
+      const cur = A.cal.day.get(toKey + '|' + date);
+      if (cur === sid) return;
+      if (cur && !overwrite) return void r.kept++;
+      const x = setCalendarDay(db, yearId, toKey, date, sid);
+      if (x.changed) r.set++;
+      r.moved += x.moved;
+      r.removed += x.removed;
+    });
+    return r;
+  }
+
+  function getAbsence(db, studentId, yearId, date) {
+    return (db.absences || []).find((a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date) || null;
+  }
+
+  /**
+   * Record (on = true) or remove an absence of a student on a day. The absence gets the subject his class
+   * has that day in the calendar (no subject that day → error). meta: {by, src}. → the absence | null.
+   */
+  function setAbsence(db, studentId, yearId, date, on, meta) {
+    db.absences = db.absences || [];
+    const same = (a) => a && a.studentId === studentId && a.yearId === yearId && a.date === date;
+    if (!on) {
+      db.absences = db.absences.filter((a) => !same(a));
+      return null;
+    }
+    const st = db.students.find((s) => s.id === studentId);
+    if (!st) throw new Error('Ο σπουδαστής δεν βρέθηκε.');
+    const key = studentCalendarKey(db, st, yearId);
+    if (!key) throw new Error('Ο/Η ' + studentName(st) + ' δεν είναι εγγεγραμμένος/η στο ' + yearLabel(db, yearId) + '.');
+    const day = calendarDay(db, yearId, key, date);
+    if (!day) throw new Error('Το τμήμα του/της ' + studentName(st) + ' δεν έχει μάθημα στις ' + dateText(date) + ' στο ημερολόγιο.');
+    const m = meta || {};
+    const cur = db.absences.find(same);
+    if (cur) {
+      if (cur.subjectId !== day.subjectId) {
+        cur.subjectId = day.subjectId;
+        cur.at = nowIso();
+      }
+      return cur;
+    }
+    const a = { studentId, yearId, date, subjectId: day.subjectId, by: m.by || '', at: nowIso(), src: m.src || 'admin' };
+    db.absences.push(a);
+    return a;
+  }
+
+  /**
+   * A student's absences in a subject (year) against the limit of his class calendar →
+   * {count, days, limit, pct, over, left, dates} — limit null (never over) when the subject has no days in it.
+   * att: attendance(db, yearId), to reuse for many students.
+   */
+  function absenceStatus(db, student, subjectId, yearId, att) {
+    const A = att && att.yearId === yearId ? att : attendance(db, yearId);
+    const key = studentCalendarKey(db, student, yearId);
+    const days = key ? A.cal.days.get(key + '|' + subjectId) || 0 : 0;
+    const limit = absenceLimit(days, A.pct);
+    const dates = (A.abs.bySubject.get(student.id + '|' + subjectId) || []).slice();
+    return { count: dates.length, days, limit, pct: A.pct, over: limit !== null && dates.length > limit, left: limit === null ? null : limit - dates.length, dates };
+  }
+
+  /**
+   * Absences of a class per subject → {pct, subjects:[{subject, days, limit}], rows:[{student, withdrawn, cells:[{count, over, dates}], total, over}]}.
+   * subjects: those with days in the class calendar (subject order), plus any other subject its students have absences in.
+   */
+  function absenceSummary(db, yearId, key) {
+    const A = attendance(db, yearId);
+    const students = classStudents(db, yearId, key);
+    const ids = new Set();
+    A.cal.days.forEach((n, k) => {
+      if (k.startsWith(key + '|') && k.split('|').length === 5) ids.add(k.slice(key.length + 1));
+    });
+    students.forEach((st) => A.abs.bySubject.forEach((l, k) => k.startsWith(st.id + '|') && ids.add(k.slice(st.id.length + 1))));
+    const order = new Map(db.subjects.map((s) => [s.id, s]));
+    const subjects = Array.from(ids)
+      .map((id) => order.get(id))
+      .filter(Boolean)
+      .sort((a, b) => LEVEL_IDS.indexOf(a.levelId) - LEVEL_IDS.indexOf(b.levelId) || a.order - b.order || compareText(a.name, b.name))
+      .map((s) => {
+        const days = A.cal.days.get(key + '|' + s.id) || 0;
+        return { subject: s, days, limit: absenceLimit(days, A.pct) };
+      });
+    const enOf = yearEnrollments(db, yearId);
+    const rows = students.map((st) => {
+      const cells = subjects.map((x) => {
+        const dates = A.abs.bySubject.get(st.id + '|' + x.subject.id) || [];
+        return { count: dates.length, over: x.limit !== null && dates.length > x.limit, dates };
+      });
+      const en = enOf.get(st.id);
+      return { student: st, withdrawn: !!(en && en.withdrawn), cells, total: cells.reduce((n, c) => n + c.count, 0), over: cells.some((c) => c.over) };
+    });
+    return { pct: A.pct, subjects, rows };
+  }
+
+  /**
+   * The days of a subject for a group of students (e.g. a teacher's class), from their class calendars
+   * → [{date, students:[student]}] in date order.
+   */
+  function subjectDates(db, yearId, subjectId, students) {
+    const byKey = new Map();
+    students.forEach((st) => {
+      const k = studentCalendarKey(db, st, yearId);
+      if (!k) return;
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(st);
+    });
+    const byDate = new Map();
+    attendance(db, yearId).cal.day.forEach((sid, k) => {
+      if (sid !== subjectId) return;
+      const list = byKey.get(k.slice(0, -11));
+      if (!list) return;
+      const date = k.slice(-10);
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date).push(...list);
+    });
+    return Array.from(byDate.keys())
+      .sort()
+      .map((date) => ({ date, students: sortStudents(byDate.get(date)) }));
+  }
+
+  /** Calendar days and absences that name a subject (they go when the subject is deleted). */
+  function subjectAttendanceUsage(db, subjectId) {
+    return {
+      days: (db.calendar || []).filter((d) => d && d.subjectId === subjectId).length,
+      absences: (db.absences || []).filter((a) => a && a.subjectId === subjectId).length,
+    };
   }
 
   // --------------------------------------------------------- transcripts (per student, per level)
@@ -2730,6 +3158,9 @@
     if (u.enrollments || u.grades)
       throw new Error('Το έτος έχει ' + u.enrollments + ' εγγραφές και ' + u.grades + ' βαθμούς και δεν μπορεί να διαγραφεί.');
     db.years = db.years.filter((y) => y.id !== yearId);
+    // the year's calendar and absences go with it
+    db.calendar = (db.calendar || []).filter((d) => d && d.yearId !== yearId);
+    db.absences = (db.absences || []).filter((a) => a && a.yearId !== yearId);
     if (db.settings.currentYearId === yearId) db.settings.currentYearId = sortYears(db.years)[0].id;
   }
 
@@ -2737,10 +3168,13 @@
     return db.grades.filter((g) => g.subjectId === subjectId).length;
   }
 
+  /** Delete a subject without grades; its calendar days and absences go with it. */
   function deleteSubject(db, subjectId) {
     const n = subjectUsage(db, subjectId);
     if (n) throw new Error('Το μάθημα έχει ' + n + ' βαθμούς. Απενεργοποιήστε το αντί να το διαγράψετε.');
     db.subjects = db.subjects.filter((s) => s.id !== subjectId);
+    db.calendar = (db.calendar || []).filter((d) => d && d.subjectId !== subjectId);
+    db.absences = (db.absences || []).filter((a) => a && a.subjectId !== subjectId);
   }
 
   /** Parse bulk subject lines: "CODE; Name; D|E|C; weight" or just "Name". */
@@ -2824,6 +3258,8 @@
     imports: ['id'],
     grades: ['studentId', 'subjectId', 'yearId'],
     enrollments: ['studentId', 'yearId'],
+    calendar: ['yearId', 'cls', 'date'],
+    absences: ['studentId', 'yearId', 'date'],
   };
   const MERGE_SETTING_MAPS = { gradeLocks: true, levelNames: true, levelPeriods: true };
 
@@ -2894,6 +3330,7 @@
       let v;
       if (deepEqual(mv, bv)) v = tv;
       else if (deepEqual(tv, bv) || deepEqual(mv, tv)) v = mv;
+      else if (name === 'absences' && mv && tv && mv.subjectId === tv.subjectId) v = mv; // the same absence recorded on both sides (secretariat and teacher)
       else {
         v = mv;
         conflicts.push({ collection: name, key: keyText(x, fields) });
@@ -2946,7 +3383,8 @@
    * 3-way merge of registry objects (plain, already parsed): base = the version both sides started from,
    * mine = the admin's version, theirs = the server's current version. Inputs are not changed.
    * Records are merged by key (years/students/subjects/imports: id, grades: studentId|subjectId|yearId,
-   * enrollments: studentId|yearId), settings per key (gradeLocks / levelNames / levelPeriods per sub-key),
+   * enrollments: studentId|yearId, calendar: yearId|cls|date, absences: studentId|yearId|date),
+   * settings per key (gradeLocks / levelNames / levelPeriods per sub-key),
    * any other top-level field as a whole; updatedAt = the later one. Per record: changed on one side →
    * that side; changed identically → it; changed differently on both → conflict (merged keeps mine).
    * Order: theirs' order, then records only in mine (imports: newest first).
@@ -3155,5 +3593,36 @@
     // v2.2 — admin save merge
     deepEqual,
     mergeRegistry,
+    // v2.3 — calendar & absences
+    DEFAULT_ABSENCE_PCT,
+    validIsoDate,
+    isoDate,
+    addDays,
+    isoWeekday,
+    dateText,
+    yearDateRange,
+    absenceLimitPct,
+    setAbsenceLimitPct,
+    absenceLimit,
+    calendarKey,
+    parseCalendarKey,
+    studentCalendarKey,
+    calendarClassName,
+    calendarClasses,
+    classStudents,
+    calendarSubjects,
+    attendance,
+    calendarDay,
+    subjectDays,
+    setCalendarDay,
+    planFill,
+    fillCalendar,
+    copyCalendar,
+    getAbsence,
+    setAbsence,
+    absenceStatus,
+    absenceSummary,
+    subjectDates,
+    subjectAttendanceUsage,
   };
 });
