@@ -640,6 +640,7 @@
     });
     const tabs = [
       { id: 'grades', label: 'Βαθμολογίες' },
+      { id: 'absences', label: 'Απουσίες' },
       { id: 'info', label: 'Στοιχεία' },
       { id: 'enroll', label: 'Εγγραφές ανά έτος' },
     ];
@@ -649,6 +650,7 @@
       const body = ctx.q('#sc-body');
       ctx.setError(null);
       if (t === 'grades') body.innerHTML = gradesTabHtml(s);
+      if (t === 'absences') body.innerHTML = absencesTabHtml(s);
       if (t === 'info') {
         body.innerHTML = studentFormHtml(s) + '<div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn btn-primary" id="sf-save">' + icon('save') + 'Αποθήκευση στοιχείων</button></div>' +
           '<p class="small faint" style="margin-top:10px">Καταχώριση: ' + fmtDate(s.createdAt, true) + ' · Τελευταία αλλαγή: ' + fmtDate(s.updatedAt, true) + '</p>';
@@ -706,6 +708,34 @@
     show(tab || 'grades');
   }
   App.openStudentCard = openStudentCard;
+
+  /** Absences per academic year and subject against the limit of the student's class calendar. */
+  function absencesTabHtml(s) {
+    const { db } = S();
+    let h = '';
+    C.sortYears(db.years).forEach((y) => {
+      const en = C.getEnrollment(db, s.id, y.id);
+      const att = C.attendance(db, y.id);
+      const key = en ? C.studentCalendarKey(db, s, y.id, en) : null;
+      const ids = new Set();
+      if (key) att.cal.days.forEach((n, k) => k.startsWith(key + '|') && k.split('|').length === 5 && ids.add(k.slice(key.length + 1)));
+      att.abs.bySubject.forEach((l, k) => k.startsWith(s.id + '|') && ids.add(k.slice(s.id.length + 1)));
+      const subjects = db.subjects.filter((x) => ids.has(x.id)).sort((a, b) => C.LEVEL_IDS.indexOf(a.levelId) - C.LEVEL_IDS.indexOf(b.levelId) || a.order - b.order);
+      if (!subjects.length) return;
+      h += '<div class="section-title">' + esc(y.label) + (key ? ' · ' + esc(C.calendarClassName(db, y.id, key)) : '') + '</div><div class="card"><table class="table table-compact"><thead><tr><th>Μάθημα</th><th class="num">Ημέρες</th><th class="num">Όριο</th><th class="num">Απουσίες</th><th>Ημερομηνίες</th></tr></thead><tbody>';
+      subjects.forEach((sj) => {
+        const st = C.absenceStatus(db, s, sj.id, y.id, att);
+        h += '<tr><td class="strong">' + esc(C.subjectLabel(sj)) + '</td><td class="num">' + (st.days || '—') + '</td><td class="num">' + (st.limit === null ? '—' : st.limit) + '</td>' +
+          '<td class="num' + (st.over ? ' danger-text strong' : '') + '">' + st.count + (st.over ? ' <span class="badge badge-danger">εκτός ορίου</span>' : '') + '</td>' +
+          '<td class="small muted">' + esc(st.dates.map(C.dateText).join(', ')) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    });
+    return (
+      (h || emptyState('calendar', 'Χωρίς απουσίες', 'Δεν υπάρχουν ημέρες μαθημάτων στο ημερολόγιο του τμήματός του ή απουσίες.')) +
+      '<p class="small muted" style="margin-top:12px">Όριο κάθε μαθήματος: ' + C.absenceLimitPct(db) + '% των ημερών του στο ημερολόγιο του τμήματος. Οι απουσίες αλλάζουν από το «Ημερολόγιο & απουσίες».</p>'
+    );
+  }
 
   function gradesTabHtml(s) {
     const { db } = S();

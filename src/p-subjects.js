@@ -337,7 +337,9 @@
       if (ok) App.mutate((d) => C.updateSubject(d, s.id, { active: false }));
       return;
     }
-    if (!(await confirmDialog('Διαγραφή μαθήματος', 'Να διαγραφεί το μάθημα <b>' + esc(C.subjectLabel(s)) + '</b>;', { danger: true, okText: 'Διαγραφή' }))) return;
+    const u = C.subjectAttendanceUsage(db, s.id);
+    const also = [u.days ? plural(u.days, 'ημέρα του ημερολογίου', 'ημέρες του ημερολογίου') : '', u.absences ? plural(u.absences, 'απουσία', 'απουσίες') : ''].filter(Boolean).join(' και ');
+    if (!(await confirmDialog('Διαγραφή μαθήματος', 'Να διαγραφεί το μάθημα <b>' + esc(C.subjectLabel(s)) + '</b>;' + (also ? '<br><br>Θα διαγραφούν μαζί του ' + also + '.' : ''), { danger: true, okText: 'Διαγραφή' }))) return;
     App.mutate((d) => C.deleteSubject(d, s.id));
     toast('Το μάθημα διαγράφηκε');
   };

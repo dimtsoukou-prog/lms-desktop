@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node test/core.test.js && node test/server.test.js && cd server && go test ./...",
-    "e2e": "xvfb-run -a node test/e2e.js && xvfb-run -a node test/e2e-exam.js",
+    "e2e": "xvfb-run -a node test/e2e.js && xvfb-run -a node test/e2e-exam.js && xvfb-run -a node test/e2e-absences.js",
     "server": "cd server && go run . --data ../.server-data"
   },
   "keywords": [],

@@ -1161,4 +1161,221 @@ t('mergeRegistry: large registry stays fast', () => {
   assert.ok(ms < 3000, 'merge took ' + ms + ' ms');
 });
 
+// ------------------------------------------------------------ calendar & absences
+function attendanceDb() {
+  const db = C.createEmptyDb(new Date(2026, 8, 25));
+  const y = db.years[0].id;
+  const st = (am, last, spec) => C.createStudent(db, { am, lastName: last, firstName: 'Χ', specialty: spec });
+  const a = st('201', 'Αλεξίου', 'DECK');
+  const b = st('202', 'Βασιλείου', 'ENGINE');
+  const c = st('203', 'Γεωργίου', 'DECK');
+  const d = st('204', 'Δημητρίου', 'DECK');
+  const e = st('205', 'Ευαγγέλου', 'ENGINE');
+  C.setEnrollment(db, a.id, y, 'SUP', 'M1', 'OCT');
+  C.setEnrollment(db, b.id, y, 'SUP', 'M1', 'OCT');
+  C.setEnrollment(db, c.id, y, 'SUP', 'M2', 'OCT');
+  C.setEnrollment(db, d.id, y, 'OLA', 'MO');
+  C.setEnrollment(db, e.id, y, 'MF1');
+  const nav = C.createSubject(db, { levelId: 'SUP', code: 'NAV', name: 'Ναυσιπλοΐα' });
+  const eng = C.createSubject(db, { levelId: 'SUP', code: 'ENG', name: 'Αγγλικά' });
+  const ola = C.createSubject(db, { levelId: 'OLA', code: 'OL1', name: 'Ναυτική τέχνη', specialty: 'DECK' });
+  const olaE = C.createSubject(db, { levelId: 'OLA', code: 'OL2', name: 'Μηχανές', specialty: 'ENGINE' });
+  const S1 = 'SUP||M1|OCT';
+  return { db, y, a, b, c, d, e, nav, eng, ola, olaE, S1 };
+}
+
+t('calendar: class keys, names and classes of a year', () => {
+  const { db, y, a, b, c, d, e } = attendanceDb();
+  assert.strictEqual(C.studentCalendarKey(db, a, y), 'SUP||M1|OCT');
+  assert.strictEqual(C.studentCalendarKey(db, b, y), 'SUP||M1|OCT', 'Support: Deck & Engine in one class');
+  assert.strictEqual(C.studentCalendarKey(db, d, y), 'OLA|DECK|MO|OCT');
+  assert.strictEqual(C.studentCalendarKey(db, e, y), 'MF1|ENGINE||', 'Management: level + specialty');
+  assert.strictEqual(C.calendarKey('SUP', 'DECK', 'M1', null), 'SUP||M1|');
+  assert.strictEqual(C.calendarKey('MF2', 'DECK', 'AF', null), 'MF2|DECK||');
+  assert.strictEqual(C.calendarKey('OLB', '', 'MO', 'MAY'), 'OLB||MO|MAY');
+  assert.deepStrictEqual(C.parseCalendarKey('OLA|DECK|MO|OCT'), { levelId: 'OLA', spec: 'DECK', section: 'MO', period: 'OCT' });
+  assert.strictEqual(C.studentCalendarKey(db, { id: 'nobody' }, y), null);
+  C.setMgmtShift(db, y, 'MF1', 'ENGINE', 'AF');
+  const cls = C.calendarClasses(db, y);
+  assert.deepStrictEqual(cls.map((x) => x.name), ['Support Morning 1 – Οκτώβριος', 'Support Morning 2 – Οκτώβριος', 'Operational Level A Deck Morning', 'Management Engine Function 1 Afternoon']);
+  assert.deepStrictEqual(cls[0].students.map((s) => s.am), ['201', '202']);
+  assert.deepStrictEqual(C.classStudents(db, y, 'SUP||M2|OCT').map((s) => s.am), ['203']);
+  // a class that only has calendar days is listed too; a student without a class gets "(χωρίς τμήμα)"
+  const f = C.createStudent(db, { am: '206', lastName: 'Ζ', firstName: 'Ζ' });
+  C.setEnrollment(db, f.id, y, 'SUP', null, 'JAN');
+  assert.strictEqual(C.calendarClassName(db, y, 'SUP|||JAN'), 'Support – Ιανουάριος (χωρίς τμήμα)');
+  // subjects of a class: level + specialty
+  assert.deepStrictEqual(C.calendarSubjects(db, y, 'OLA|DECK|MO|OCT').map((s) => s.code), ['OL1']);
+  assert.deepStrictEqual(C.calendarSubjects(db, y, 'SUP||M1|OCT').map((s) => s.code), ['NAV', 'ENG']);
+});
+
+t('absences: limit = ⌊days × % / 100⌋, setting validation', () => {
+  assert.strictEqual(C.absenceLimit(20, 30), 6);
+  assert.strictEqual(C.absenceLimit(22, 30), 6);
+  assert.strictEqual(C.absenceLimit(7, 30), 2);
+  assert.strictEqual(C.absenceLimit(3, 100), 3);
+  assert.strictEqual(C.absenceLimit(10, 0), 0);
+  assert.strictEqual(C.absenceLimit(0, 30), null, 'no days → no limit');
+  const db = C.createEmptyDb(new Date(2026, 8, 25));
+  assert.strictEqual(C.absenceLimitPct(db), 30);
+  assert.strictEqual(C.setAbsenceLimitPct(db, ' 25% '), 25);
+  assert.strictEqual(C.absenceLimitPct(db), 25);
+  ['', 'x', 101, -1, 2.5, '12,5', null].forEach((v) => assert.throws(() => C.setAbsenceLimitPct(db, v), /ακέραιος από 0 έως 100/, 'reject ' + v));
+  assert.strictEqual(db.settings.absenceLimitPct, 25);
+  db.settings.absenceLimitPct = '40'; // not a number → default
+  assert.strictEqual(C.absenceLimitPct(db), 30);
+  db.settings.absenceLimitPct = 12.5;
+  assert.strictEqual(C.absenceLimitPct(db), 30);
+});
+
+t('calendar: one subject per day, fill a range, keep / overwrite, academic year bounds', () => {
+  const { db, y, nav, eng, S1 } = attendanceDb();
+  assert.deepStrictEqual(C.yearDateRange(db, y), { from: '2026-09-01', to: '2027-08-31' });
+  assert.throws(() => C.setCalendarDay(db, y, S1, '2026-08-31', nav.id), /δεν ανήκει στο ακαδημαϊκό έτος 2026-2027/);
+  assert.throws(() => C.setCalendarDay(db, y, S1, '2026-02-30', nav.id), /Μη έγκυρη ημερομηνία/);
+  assert.throws(() => C.setCalendarDay(db, y, S1, '2026-10-05', 'nope'), /δεν βρέθηκε/);
+  assert.deepStrictEqual(C.setCalendarDay(db, y, S1, '2026-10-05', nav.id), { changed: true, moved: 0, removed: 0 });
+  assert.strictEqual(C.setCalendarDay(db, y, S1, '2026-10-05', nav.id).changed, false);
+  assert.strictEqual(C.calendarDay(db, y, S1, '2026-10-05').subjectId, nav.id);
+  // Mon 5 Oct – Sun 18 Oct, weekdays only: 10 days, the 5th already has NAV
+  let p = C.planFill(db, y, S1, { from: '2026-10-05', to: '2026-10-18', subjectId: nav.id });
+  assert.deepStrictEqual([p.change, p.keep], [9, 0]);
+  let r = C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-18', subjectId: nav.id });
+  assert.strictEqual(r.set, 9);
+  assert.strictEqual(C.subjectDays(db, y, S1, nav.id), 10);
+  assert.ok(!C.calendarDay(db, y, S1, '2026-10-10'), 'Saturday left empty');
+  // English on Mondays and Wednesdays: kept (NAV) unless overwrite
+  p = C.planFill(db, y, S1, { from: '2026-10-05', to: '2026-10-18', subjectId: eng.id, weekdays: [1, 3] });
+  assert.deepStrictEqual([p.change, p.keep], [0, 4]);
+  r = C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-18', subjectId: eng.id, weekdays: [1, 3], overwrite: true });
+  assert.strictEqual(r.set, 4);
+  assert.strictEqual(C.subjectDays(db, y, S1, nav.id), 6);
+  assert.strictEqual(C.subjectDays(db, y, S1, eng.id), 4);
+  assert.strictEqual(db.calendar.filter((d) => d.date === '2026-10-05').length, 1, 'one record per class and day');
+  // clear the second week
+  r = C.fillCalendar(db, y, S1, { from: '2026-10-12', to: '2026-10-18', subjectId: null, weekdays: [0, 1, 2, 3, 4, 5, 6] });
+  assert.strictEqual(r.set, 5);
+  assert.strictEqual(C.subjectDays(db, y, S1, nav.id) + C.subjectDays(db, y, S1, eng.id), 5);
+  assert.throws(() => C.planFill(db, y, S1, { from: '2026-10-18', to: '2026-10-05', subjectId: nav.id }), /πριν από/);
+  assert.throws(() => C.planFill(db, y, 'OLA|DECK|MO|OCT', { from: '2026-10-05', to: '2026-10-06', subjectId: nav.id }), /δεν ανήκει σε αυτό το τμήμα/);
+});
+
+t('absences: subject of the day, limit per class calendar, moves with the calendar', () => {
+  const { db, y, a, b, c, nav, eng, S1 } = attendanceDb();
+  C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-30', subjectId: nav.id }); // 20 weekdays
+  C.fillCalendar(db, y, 'SUP||M2|OCT', { from: '2026-10-05', to: '2026-10-09', subjectId: nav.id }); // another class: 5 days
+  assert.strictEqual(C.subjectDays(db, y, S1, nav.id), 20);
+  assert.throws(() => C.setAbsence(db, a.id, y, '2026-10-10', true), /δεν έχει μάθημα στις 10\/10\/2026/);
+  const days = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-12'];
+  days.forEach((dt) => C.setAbsence(db, a.id, y, dt, true, { by: 'admin' }));
+  let s = C.absenceStatus(db, a, nav.id, y);
+  assert.deepStrictEqual([s.count, s.days, s.limit, s.over, s.left, s.pct], [6, 20, 6, false, 0, 30], 'at the limit: still allowed');
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-05').subjectId, nav.id);
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-05').src, 'admin');
+  C.setAbsence(db, a.id, y, '2026-10-05', true); // twice → one record
+  assert.strictEqual(db.absences.filter((x) => x.studentId === a.id).length, 6);
+  C.setAbsence(db, a.id, y, '2026-10-13', true);
+  s = C.absenceStatus(db, a, nav.id, y);
+  assert.deepStrictEqual([s.count, s.limit, s.over, s.left], [7, 6, true, -1], 'over the limit');
+  assert.deepStrictEqual(s.dates, days.concat(['2026-10-13']));
+  // another class has its own limit: 5 days → 1
+  C.setAbsence(db, c.id, y, '2026-10-05', true);
+  C.setAbsence(db, c.id, y, '2026-10-06', true);
+  s = C.absenceStatus(db, c, nav.id, y);
+  assert.deepStrictEqual([s.count, s.days, s.limit, s.over], [2, 5, 1, true]);
+  // a subject without days in the class calendar: no limit, never over
+  s = C.absenceStatus(db, b, eng.id, y);
+  assert.deepStrictEqual([s.count, s.days, s.limit, s.over], [0, 0, null, false]);
+  // the day turns out to be English: the absences of the class that day move with it
+  C.setAbsence(db, b.id, y, '2026-10-13', true);
+  let r = C.setCalendarDay(db, y, S1, '2026-10-13', eng.id);
+  assert.deepStrictEqual(r, { changed: true, moved: 2, removed: 0 });
+  assert.strictEqual(C.getAbsence(db, a.id, y, '2026-10-13').subjectId, eng.id);
+  assert.strictEqual(C.absenceStatus(db, a, nav.id, y).count, 6);
+  assert.strictEqual(C.absenceStatus(db, c, nav.id, y).count, 2, 'other classes untouched');
+  // no lesson that day after all: its absences go
+  r = C.setCalendarDay(db, y, S1, '2026-10-13', null);
+  assert.deepStrictEqual(r, { changed: true, moved: 0, removed: 2 });
+  assert.strictEqual(C.getAbsence(db, b.id, y, '2026-10-13'), null);
+  C.setAbsence(db, a.id, y, '2026-10-12', false);
+  assert.strictEqual(C.absenceStatus(db, a, nav.id, y).count, 5);
+  // the % comes from the settings
+  C.setAbsenceLimitPct(db, 20);
+  s = C.absenceStatus(db, a, nav.id, y);
+  assert.deepStrictEqual([s.days, s.limit, s.over], [19, 3, true]);
+});
+
+t('absences: class summary, dates of a subject, copy of a calendar', () => {
+  const { db, y, a, b, nav, eng, S1 } = attendanceDb();
+  C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-16', subjectId: nav.id }); // 10 days → limit 3
+  C.fillCalendar(db, y, S1, { from: '2026-10-19', to: '2026-10-20', subjectId: eng.id }); // 2 days → limit 0
+  ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'].forEach((dt) => C.setAbsence(db, a.id, y, dt, true));
+  C.setAbsence(db, b.id, y, '2026-10-19', true);
+  const sum = C.absenceSummary(db, y, S1);
+  assert.deepStrictEqual(sum.subjects.map((x) => [x.subject.code, x.days, x.limit]), [['NAV', 10, 3], ['ENG', 2, 0]]);
+  assert.deepStrictEqual(sum.rows.map((r) => [r.student.am, r.cells.map((c) => c.count + (c.over ? '!' : '')), r.total, r.over]), [
+    ['201', ['4!', '0'], 4, true],
+    ['202', ['0', '1!'], 1, true],
+  ]);
+  const dd = C.subjectDates(db, y, eng.id, [a, b]);
+  assert.deepStrictEqual(dd.map((x) => [x.date, x.students.map((s) => s.am)]), [['2026-10-19', ['201', '202']], ['2026-10-20', ['201', '202']]]);
+  // copy to Morning 2 (same level): all days; absences are not copied
+  let r = C.copyCalendar(db, y, S1, 'SUP||M2|OCT', false);
+  assert.strictEqual(r.set, 12);
+  assert.strictEqual(C.subjectDays(db, y, 'SUP||M2|OCT', nav.id), 10);
+  assert.strictEqual(C.absenceSummary(db, y, 'SUP||M2|OCT').rows[0].total, 0);
+  // to a class of another level: its subjects do not apply → skipped
+  r = C.copyCalendar(db, y, S1, 'OLA|DECK|MO|OCT', false);
+  assert.deepStrictEqual([r.set, r.skipped], [0, 12]);
+  assert.throws(() => C.copyCalendar(db, y, S1, S1), /άλλο τμήμα/);
+});
+
+t('absences: merge, normalize, deletes', () => {
+  const { db, y, a, b, nav, eng, S1 } = attendanceDb();
+  C.fillCalendar(db, y, S1, { from: '2026-10-05', to: '2026-10-09', subjectId: nav.id });
+  const base = JSON.parse(JSON.stringify(db));
+  const mine = JSON.parse(JSON.stringify(db));
+  const theirs = JSON.parse(JSON.stringify(db));
+  C.setCalendarDay(mine, y, S1, '2026-10-12', eng.id); // the admin adds a day
+  C.setAbsence(theirs, a.id, y, '2026-10-05', true, { by: 'teacher1', src: 'teacher' }); // a teacher marks an absence
+  let m = C.mergeRegistry(base, mine, theirs);
+  assert.deepStrictEqual(m.conflicts, []);
+  assert.strictEqual(m.merged.calendar.length, 6);
+  assert.strictEqual(m.merged.absences.length, 1);
+  assert.strictEqual(m.merged.absences[0].by, 'teacher1');
+  // both change the same day of the calendar → conflict on "yearId|cls|date"
+  const mine2 = JSON.parse(JSON.stringify(db));
+  const theirs2 = JSON.parse(JSON.stringify(db));
+  C.setCalendarDay(mine2, y, S1, '2026-10-05', eng.id);
+  C.setCalendarDay(theirs2, y, S1, '2026-10-05', null);
+  m = C.mergeRegistry(base, mine2, theirs2);
+  assert.deepStrictEqual(m.conflicts, [{ collection: 'calendar', key: y + '|' + S1 + '|2026-10-05' }]);
+  // the secretariat and a teacher record the same absence → no conflict (the admin's record is kept)
+  const mine3 = JSON.parse(JSON.stringify(db));
+  const theirs3 = JSON.parse(JSON.stringify(db));
+  C.setAbsence(mine3, b.id, y, '2026-10-06', true, { by: 'admin' });
+  C.setAbsence(theirs3, b.id, y, '2026-10-06', true, { by: 'teacher1', src: 'teacher' });
+  m = C.mergeRegistry(base, mine3, theirs3);
+  assert.deepStrictEqual(m.conflicts, []);
+  assert.deepStrictEqual(m.merged.absences.map((x) => [x.studentId, x.by]), [[b.id, 'admin']]);
+  // an older registry gets the collections
+  const old = JSON.parse(JSON.stringify(db));
+  delete old.calendar;
+  delete old.absences;
+  const n = C.normalizeDb(old);
+  assert.deepStrictEqual([n.calendar, n.absences], [[], []]);
+  // deletes: a student's absences, a subject's days + absences, a year's calendar
+  C.setAbsence(db, a.id, y, '2026-10-05', true);
+  C.setAbsence(db, b.id, y, '2026-10-06', true);
+  assert.deepStrictEqual(C.subjectAttendanceUsage(db, nav.id), { days: 5, absences: 2 });
+  C.deleteStudent(db, a.id);
+  assert.deepStrictEqual(db.absences.map((x) => x.studentId), [b.id]);
+  C.deleteSubject(db, nav.id);
+  assert.deepStrictEqual([db.calendar.length, db.absences.length], [0, 0]);
+  const y2 = C.addYear(db, '2027-2028');
+  C.setCalendarDay(db, y2.id, S1, '2027-10-04', eng.id);
+  C.deleteYear(db, y2.id);
+  assert.strictEqual(db.calendar.length, 0);
+});
+
 console.log(passed + ' tests passed' + (process.exitCode ? ' (with failures)' : ''));

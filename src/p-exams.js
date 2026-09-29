@@ -130,19 +130,67 @@
     return h + '</div>';
   }
 
+  /**
+   * Absences of the draft's students in its subject (computed here from the registry; the server decides the same way)
+   * → amKey → {student, status} — empty when the exam has no subject.
+   */
+  function draftAbsences() {
+    const { db } = S();
+    const d = X.draft;
+    const out = new Map();
+    const sj = d && d.subjectId ? db.subjects.find((s) => s.id === d.subjectId) : null;
+    if (!sj) return out;
+    const yearId = d.yearId && db.years.some((y) => y.id === d.yearId) ? d.yearId : S().yearId;
+    const att = C.attendance(db, yearId);
+    const byAm = new Map(db.students.map((s) => [App.accounts.amKey(s.am), s]));
+    d.assignments.forEach((a) => {
+      const k = App.accounts.amKey(a.am);
+      const st = byAm.get(k) || (a.studentId && db.students.find((s) => s.id === a.studentId));
+      if (st) out.set(k, { student: st, status: C.absenceStatus(db, st, sj.id, yearId, att) });
+    });
+    return out;
+  }
+
+  /** «Να γράψει» / «Ανάκληση» button of a student over the absence limit (the permission is per exam, on the server). */
+  function allowButton(am, name, n, limit, allowed) {
+    const data = ' data-action="exAllow" data-am="' + esc(am) + '" data-name="' + esc(name || am) + '" data-n="' + n + '" data-limit="' + (limit === null || limit === undefined ? '' : limit) + '"';
+    return allowed
+      ? '<button class="btn btn-sm btn-ghost ex-allow" title="Να μην μπορεί να γράψει λόγω απουσιών"' + data + ' data-v="0">' + icon('undo') + 'Ανάκληση άδειας</button>'
+      : '<button class="btn btn-sm btn-soft ex-allow" title="Άδεια συμμετοχής σε αυτή την εξέταση παρά τις απουσίες"' + data + ' data-v="1">' + icon('check') + 'Να γράψει</button>';
+  }
+
   function assignmentsHtml(acc) {
     const d = X.draft;
     const noAcc = d.assignments.filter((a) => !acc.has(App.accounts.amKey(a.am)));
+    const abs = draftAbsences();
+    const allowed = d.absenceAllowed || {};
+    const over = d.assignments.filter((a) => {
+      const x = abs.get(App.accounts.amKey(a.am));
+      return x && x.status.over && !allowed[App.accounts.amKey(a.am)];
+    });
     let h = '<div class="card" style="margin-top:16px"><div class="card-head"><div><h3>Ανάθεση σε σπουδαστές (' + d.assignments.length + ')</h3><div class="sub">Μόνο αυτοί οι σπουδαστές βλέπουν την εξέταση στον λογαριασμό τους</div></div>' +
       '<div class="row">' + (d.assignments.length ? '<button class="btn btn-sm btn-ghost" data-action="exAssignClear">Καθαρισμός</button>' : '') + '<button class="btn btn-primary btn-sm" data-action="exAssign" id="ex-assign">' + icon('users') + 'Επιλογή σπουδαστών…</button></div></div>';
     if (noAcc.length) {
       h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" style="align-items:center">' + icon('key') + '<p style="flex:1">' + plural(noAcc.length, 'σπουδαστής δεν έχει', 'σπουδαστές δεν έχουν') + ' λογαριασμό σύνδεσης και δεν θα μπορεί' + (noAcc.length === 1 ? '' : 'ούν') + ' να γράψ' + (noAcc.length === 1 ? 'ει' : 'ουν') + ' την εξέταση.</p><button class="btn btn-sm" data-action="exMakeAccounts">' + icon('key') + 'Δημιουργία λογαριασμών</button></div></div>';
     }
+    if (over.length)
+      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" id="ex-over-note">' + icon('alert') + '<p>' + plural(over.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες απουσίες από το όριο στο μάθημα και <b>δεν θα μπορ' + (over.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (over.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση — θα δ' + (over.length === 1 ? 'ει' : 'ουν') + ' μήνυμα στην οθόνη τ' + (over.length === 1 ? 'ου' : 'ους') + '. Με «Να γράψει» δίνετε άδεια' + (d.id ? '' : ' (μετά την αποθήκευση της εξέτασης)') + '.</p></div></div>';
     if (!d.assignments.length) return h + '<div class="card-body muted small">Δεν έχουν επιλεγεί σπουδαστές.</div></div>';
-    h += '<div class="table-wrap" style="max-height:340px"><table class="table table-compact"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Λογαριασμός</th><th></th></tr></thead><tbody>';
+    const withAbs = !!(d.subjectId && S().db.subjects.some((s) => s.id === d.subjectId));
+    h += '<div class="table-wrap" style="max-height:340px"><table class="table table-compact"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Λογαριασμός</th>' + (withAbs ? '<th title="Απουσίες στο μάθημα / όριο">Απουσίες</th>' : '') + '<th></th></tr></thead><tbody>';
     d.assignments.forEach((a, i) => {
-      const u = acc.get(App.accounts.amKey(a.am));
-      h += '<tr><td class="am">' + esc(a.am) + '</td><td class="strong">' + esc(a.name) + '</td><td class="small">' + esc(a.className || '') + '</td><td>' + (u ? (u.active ? '<span class="pill-state ok">ενεργός</span>' : '<span class="pill-state bad">ανενεργός</span>') : '<span class="pill-state warn">χωρίς λογαριασμό</span>') + '</td>' +
+      const k = App.accounts.amKey(a.am);
+      const u = acc.get(k);
+      let absCell = '';
+      if (withAbs) {
+        const x = abs.get(k);
+        const s = x && x.status;
+        const ok = !!allowed[k];
+        absCell = '<td class="ex-abs' + (s && s.over ? ' over' : '') + '">' + (!s ? '<span class="faint">—</span>' : s.count + (s.limit !== null ? ' / ' + s.limit : '')) +
+          (s && s.over ? (ok ? ' <span class="badge badge-success" title="Έχει άδεια για αυτή την εξέταση">άδεια</span>' : ' <span class="badge badge-danger">εκτός ορίου</span>') : '') +
+          (d.id && s && (s.over || ok) ? allowButton(a.am, a.name, s.count, s.limit, ok) : '') + '</td>';
+      }
+      h += '<tr><td class="am">' + esc(a.am) + '</td><td class="strong">' + esc(a.name) + '</td><td class="small">' + esc(a.className || '') + '</td><td>' + (u ? (u.active ? '<span class="pill-state ok">ενεργός</span>' : '<span class="pill-state bad">ανενεργός</span>') : '<span class="pill-state warn">χωρίς λογαριασμό</span>') + '</td>' + absCell +
         '<td class="right"><button class="btn btn-sm btn-ghost btn-icon" title="Αφαίρεση" data-action="exUnassign" data-i="' + i + '">' + icon('x') + '</button></td></tr>';
     });
     return h + '</tbody></table></div></div>';
@@ -163,7 +211,7 @@
     // details
     h += '<div class="card"><div class="card-head"><div><h3>Στοιχεία εξέτασης</h3><div class="sub">Ενδιάμεσο τεστ — βαθμολογείται αυτόματα από το σύστημα</div></div></div><div class="card-body form-grid">' +
       '<div class="field span-2"><label>Τίτλος *</label><input class="input" id="ex-title" value="' + esc(d.title) + '" placeholder="π.χ. 1η Πρόοδος Ναυσιπλοΐας" data-on-input="exF" data-k="title" /></div>' +
-      '<div class="field span-2"><label>Μάθημα</label><select class="select" data-on-change="exSubject">' + subjectOptions(d.subjectId) + '</select></div>' +
+      '<div class="field span-2"><label>Μάθημα</label><select class="select" data-on-change="exSubject">' + subjectOptions(d.subjectId) + '</select><div class="hint">Με μάθημα γίνεται και ο έλεγχος απουσιών: όσοι έχουν περισσότερες από το όριο δεν μπορούν να ξεκινήσουν την εξέταση.</div></div>' +
       '<div class="field"><label>Ημερομηνία *</label><input class="input" type="date" id="ex-date" value="' + esc(d.date) + '" data-on-change="exF" data-k="date" /></div>' +
       '<div class="field"><label>Ώρα έναρξης *</label><input class="input" type="time" id="ex-time" value="' + esc(d.time) + '" data-on-change="exF" data-k="time" /></div>' +
       '<div class="field"><label>Διάρκεια (λεπτά) *</label><input class="input" type="number" min="1" max="600" id="ex-dur" value="' + esc(d.durationMinutes) + '" data-on-input="exF" data-k="durationMinutes" /></div>' +
@@ -215,11 +263,15 @@
 
   // ================================================================== results
   const STATE = { submitted: ['Υποβλήθηκε', 'ok'], in_progress: ['Σε εξέλιξη', 'live'], not_started: ['Δεν ξεκίνησε', ''], missed: ['Δεν συμμετείχε', 'bad'] };
+  /** Not started and over the absence limit of the subject without the admin's permission: the student cannot start. */
+  const barredRow = (x) => !!x.overLimit && !x.absenceAllowed && x.status !== 'submitted' && x.status !== 'in_progress';
   function resultsHtml() {
     const r = X.res;
     if (!r) return '<div class="card card-pad muted">Φόρτωση αποτελεσμάτων…</div>';
     const e = r.exam;
     const rows = r.rows.slice().sort((a, b) => String(a.className || '').localeCompare(String(b.className || ''), 'el') || String(a.name || '').localeCompare(String(b.name || ''), 'el'));
+    const chk = !!e.absenceCheck;
+    const barred = rows.filter(barredRow);
     const sub = rows.filter((x) => x.status === 'submitted');
     const running = rows.filter((x) => x.status === 'in_progress').length;
     const avgP = sub.length ? sub.reduce((a, x) => a + x.percent, 0) / sub.length : null;
@@ -228,14 +280,22 @@
     let h = '<div class="row" style="margin-bottom:14px"><button class="btn btn-ghost" data-action="exBack">' + icon('left') + 'Εξετάσεις</button><span class="pill-state ' + st.cls + '">' + esc(st.label) + '</span><div class="spacer"></div>' +
       '<button class="btn btn-sm btn-ghost" data-action="exResRefresh">' + icon('refresh') + 'Ανανέωση</button><button class="btn" data-action="exOpen" data-id="' + e.id + '">' + icon('edit') + 'Επεξεργασία</button><button class="btn btn-primary" data-action="exResExcel" id="ex-res-excel">' + icon('download') + 'Εξαγωγή σε Excel</button></div>';
     h += '<div class="card"><div class="card-head"><div><h2>' + esc(e.title) + '</h2><div class="sub">' + esc(e.subjectName || '') + (e.subjectName ? ' · ' : '') + esc(when(e.startsAt)) + ' · ' + e.durationMinutes + ' λεπτά · ' + plural(e.questionCount, 'ερώτηση', 'ερωτήσεις') + '</div></div>' +
-      '<div class="row" style="gap:26px">' + stat(rows.length, 'ανατέθηκε') + stat(sub.length, 'υποβλήθηκαν') + (running ? stat(running, 'σε εξέλιξη') : '') + stat(avgP === null ? '—' : Math.round(avgP) + '%', 'μ.ο. ποσοστού') + stat(avgG === null ? '—' : avgG.toFixed(2), 'μ.ο. βαθμού 0–5') + '</div></div>';
+      '<div class="row" style="gap:26px">' + stat(rows.length, 'ανατέθηκε') + stat(sub.length, 'υποβλήθηκαν') + (running ? stat(running, 'σε εξέλιξη') : '') + (barred.length ? stat(barred.length, 'χωρίς δικαίωμα') : '') + stat(avgP === null ? '—' : Math.round(avgP) + '%', 'μ.ο. ποσοστού') + stat(avgG === null ? '—' : avgG.toFixed(2), 'μ.ο. βαθμού 0–5') + '</div></div>';
     h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout" style="margin:0">' + icon('info') + '<p>Μετράει στην τελική βαθμολογία: <b>' + (e.countsFinal ? 'ΝΑΙ' : 'ΟΧΙ') + '</b> (απόφαση καθηγητή). Ο βαθμός του τεστ <b>δεν</b> περνά αυτόματα στο βαθμολόγιο — ο τελικός βαθμός του μαθήματος εισάγεται μόνο από τον καθηγητή.</p></div></div>';
-    h += '<div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Κατάσταση</th><th>Έναρξη</th><th>Υποβολή</th><th class="num">Μονάδες</th><th class="num">%</th><th class="num">Βαθμός 0–5</th><th></th></tr></thead><tbody>';
+    if (barred.length)
+      h += '<div class="card-body" style="border-bottom:1px solid var(--border)"><div class="callout warn" style="margin:0" id="ex-res-barred">' + icon('alert') + '<p>' + plural(barred.length, 'σπουδαστής έχει', 'σπουδαστές έχουν') + ' περισσότερες απουσίες από το όριο στο μάθημα και <b>δεν μπορ' + (barred.length === 1 ? 'εί' : 'ούν') + ' να ξεκινήσ' + (barred.length === 1 ? 'ει' : 'ουν') + '</b> την εξέταση (βλέπ' + (barred.length === 1 ? 'ει' : 'ουν') + ' σχετικό μήνυμα). Με «Να γράψει» δίνετε άδεια μόνο για αυτή την εξέταση.</p></div></div>';
+    h += '<div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th><th>Τμήμα</th><th>Κατάσταση</th>' + (chk ? '<th title="Απουσίες στο μάθημα / όριο">Απουσίες</th>' : '') + '<th>Έναρξη</th><th>Υποβολή</th><th class="num">Μονάδες</th><th class="num">%</th><th class="num">Βαθμός 0–5</th><th></th></tr></thead><tbody>';
     rows.forEach((x) => {
-      const s = STATE[x.status] || [x.status, ''];
+      const no = barredRow(x);
+      const s = no ? ['Χωρίς δικαίωμα (απουσίες)', 'bad'] : STATE[x.status] || [x.status, ''];
       const has = x.status === 'submitted' || x.status === 'in_progress';
-      h += '<tr><td class="am">' + esc(x.am) + '</td><td class="strong">' + esc(x.name || '') + (x.account === 'none' ? ' <span class="badge badge-warning" title="Χωρίς λογαριασμό σύνδεσης">χωρίς λογαριασμό</span>' : '') + '</td><td class="small">' + esc(x.className || '') + '</td>' +
-        '<td><span class="pill-state ' + s[1] + '">' + esc(s[0]) + '</span>' + (x.autoSubmitted ? ' <span class="small muted" title="Υποβλήθηκε αυτόματα στη λήξη του χρόνου">αυτόματα</span>' : '') + '</td>' +
+      const absCell = !chk
+        ? ''
+        : '<td class="ex-abs' + (x.overLimit ? ' over' : '') + '">' + (x.absences === undefined ? '<span class="faint">—</span>' : x.absences + (x.absenceLimit !== null && x.absenceLimit !== undefined ? ' / ' + x.absenceLimit : '')) +
+          (x.absenceAllowed ? ' <span class="badge badge-success" title="Έχει άδεια για αυτή την εξέταση">άδεια</span>' : '') +
+          (!has && (x.absenceAllowed || x.overLimit) ? allowButton(x.am, x.name, x.absences, x.absenceLimit, !!x.absenceAllowed) : '') + '</td>';
+      h += '<tr' + (no ? ' class="ex-barred-row"' : '') + ' data-am="' + esc(x.am) + '"><td class="am">' + esc(x.am) + '</td><td class="strong">' + esc(x.name || '') + (x.account === 'none' ? ' <span class="badge badge-warning" title="Χωρίς λογαριασμό σύνδεσης">χωρίς λογαριασμό</span>' : '') + '</td><td class="small">' + esc(x.className || '') + '</td>' +
+        '<td><span class="pill-state ' + s[1] + '">' + esc(s[0]) + '</span>' + (x.autoSubmitted ? ' <span class="small muted" title="Υποβλήθηκε αυτόματα στη λήξη του χρόνου">αυτόματα</span>' : '') + '</td>' + absCell +
         '<td class="small nowrap">' + (x.startedAt ? esc(fmtDate(x.startedAt, true).slice(11)) : '—') + '</td><td class="small nowrap">' + (x.submittedAt ? esc(fmtDate(x.submittedAt, true).slice(11)) : '—') + '</td>' +
         '<td class="num">' + (has ? x.score + ' / ' + x.max : '') + '</td><td class="num">' + (has ? Math.round(x.percent) + '%' : '') + '</td><td class="num strong' + (has && x.grade < 1 ? ' danger-text' : '') + '">' + (has ? x.grade : '') + '</td>' +
         '<td class="right nowrap">' + (has ? '<button class="btn btn-sm btn-ghost" data-action="exResDetail" data-am="' + esc(x.am) + '">' + icon('eye') + 'Απαντήσεις</button><button class="btn btn-sm btn-ghost" title="Να ξαναγράψει την εξέταση" data-action="exResReset" data-am="' + esc(x.am) + '">' + icon('undo') + '</button>' : '') + '</td></tr>';
@@ -669,8 +729,12 @@
       if (p.startsAt + (p.entryMinutes + p.durationMinutes) * 60000 < Remote.now()) throw new Error('Η ημερομηνία/ώρα της εξέτασης έχει ήδη περάσει.');
       const acc = await App.accounts.map();
       const noAcc = X.draft.assignments.filter((a) => !acc.has(App.accounts.amKey(a.am))).length;
+      const allowed = X.draft.absenceAllowed || {};
+      let over = 0;
+      draftAbsences().forEach((x, k) => x.status.over && !allowed[k] && over++);
       const msg = '<b>' + esc(X.draft.title) + '</b><br>' + esc(when(p.startsAt)) + ' · ' + p.durationMinutes + ' λεπτά · ' + plural(p.questions.length, 'ερώτηση', 'ερωτήσεις') + '<br><br>Η εξέταση θα εμφανιστεί στους <b>' + X.draft.assignments.length + '</b> σπουδαστές που της έχουν ανατεθεί και θα ανοίξει αυτόματα την ώρα έναρξης.' +
-        (noAcc ? '<br><br><span class="warning-text">' + plural(noAcc, 'σπουδαστής δεν έχει', 'σπουδαστές δεν έχουν') + ' λογαριασμό σύνδεσης.</span>' : '');
+        (noAcc ? '<br><br><span class="warning-text">' + plural(noAcc, 'σπουδαστής δεν έχει', 'σπουδαστές δεν έχουν') + ' λογαριασμό σύνδεσης.</span>' : '') +
+        (over ? '<br><br><span class="danger-text">' + plural(over, 'σπουδαστής είναι', 'σπουδαστές είναι') + ' εκτός ορίου απουσιών στο μάθημα και δεν θα μπορ' + (over === 1 ? 'εί' : 'ούν') + ' να την ξεκινήσ' + (over === 1 ? 'ει' : 'ουν') + ' (εκτός αν δώσετε άδεια).</span>' : '');
       if (!(await confirmDialog('Δημοσίευση εξέτασης', msg, { okText: 'Δημοσίευση' }))) return;
     }
     const id = X.dirty || !X.draft.id ? await save(true) : X.draft.id;
@@ -734,6 +798,26 @@
         '</tbody></table></div>',
       buttons: [{ label: 'Κλείσιμο' }],
     });
+  };
+  App.actions.exAllow = async (el) => {
+    const on = el.dataset.v === '1';
+    const id = X.view === 'results' ? X.resId : X.draft && X.draft.id;
+    if (!id) throw new Error('Αποθηκεύστε πρώτα την εξέταση.');
+    const lim = el.dataset.limit;
+    if (
+      on &&
+      !(await confirmDialog(
+        'Άδεια συμμετοχής',
+        '<b>' + esc(el.dataset.name) + '</b> έχει <b>' + esc(el.dataset.n) + '</b> απουσίες στο μάθημα' + (lim !== '' ? ' (όριο ' + esc(lim) + ')' : '') + ' και κανονικά δεν έχει δικαίωμα συμμετοχής.<br><br>Να μπορεί να γράψει <b>αυτή</b> την εξέταση; (Οι άλλες εξετάσεις του μαθήματος δεν αλλάζουν.)',
+        { okText: 'Να γράψει' }
+      ))
+    )
+      return;
+    const r = await Remote.allowAbsence(id, el.dataset.am, on);
+    if (X.view === 'results') await loadResults();
+    else if (X.draft && X.draft.id === id) X.draft.absenceAllowed = r.absenceAllowed || {};
+    toast(on ? '<b>' + esc(el.dataset.name) + '</b> μπορεί να γράψει την εξέταση παρά τις απουσίες' : 'Η άδεια του/της <b>' + esc(el.dataset.name) + '</b> ανακλήθηκε', on ? 'success' : 'info');
+    rerenderKeepScroll();
   };
   App.actions.exResReset = async (el) => {
     const row = X.res.rows.find((x) => x.am === el.dataset.am) || {};

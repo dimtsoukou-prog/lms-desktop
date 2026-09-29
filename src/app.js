@@ -153,7 +153,7 @@
       const y = find('years', id);
       return y ? ' · ' + y.label : '';
     };
-    const SET = { levelNames: 'ονομασίες επιπέδων', sections: 'τμήματα', periods: 'περίοδοι', levelPeriods: 'περίοδοι επιπέδων', gradeLocks: 'κλείδωμα βαθμολογίας', currentYearId: 'τρέχον έτος' };
+    const SET = { levelNames: 'ονομασίες επιπέδων', sections: 'τμήματα', periods: 'περίοδοι', levelPeriods: 'περίοδοι επιπέδων', gradeLocks: 'κλείδωμα βαθμολογίας', currentYearId: 'τρέχον έτος', absenceLimitPct: 'όριο απουσιών' };
     const out = [];
     conflicts.forEach((c) => {
       const k = String(c.key).split('|');
@@ -164,6 +164,8 @@
       else if (c.collection === 'subjects') t = 'Μάθημα: ' + subj(k[0]);
       else if (c.collection === 'years') t = 'Ακαδημαϊκό έτος' + year(k[0]);
       else if (c.collection === 'imports') t = 'Ιστορικό εισαγωγών';
+      else if (c.collection === 'calendar') t = 'Ημερολόγιο: ' + C.calendarClassName(S.db, k[0], k.slice(1, 5).join('|')) + ' · ' + C.dateText(k[5]);
+      else if (c.collection === 'absences') t = 'Απουσία: ' + stName(k[0]) + ' · ' + C.dateText(k[2]);
       else if (/^settings/.test(c.collection)) {
         const key = c.collection === 'settings' ? c.key : c.collection.slice(9);
         t = 'Ρυθμίσεις: ' + (SET[key] || key);
@@ -378,6 +380,7 @@
     { id: 'students', label: 'Μητρώο σπουδαστών', icon: 'users', title: 'Μητρώο σπουδαστών' },
     { id: 'subjects', label: 'Μαθήματα', icon: 'book', title: 'Μαθήματα' },
     { id: 'gradebook', label: 'Βαθμολόγιο', icon: 'grid', title: 'Βαθμολόγιο' },
+    { id: 'calendar', label: 'Ημερολόγιο & απουσίες', icon: 'calendar', title: 'Ημερολόγιο & απουσίες' },
     { section: 'Αρχεία Excel' },
     { id: 'import', label: 'Εισαγωγή', icon: 'upload', title: 'Εισαγωγή από Excel' },
     { id: 'export', label: 'Εξαγωγή', icon: 'download', title: 'Εξαγωγή σε Excel' },
@@ -722,6 +725,13 @@
       // periods (intakes)
       h += periodsCardHtml(db);
 
+      // absence limit
+      const pct = C.absenceLimitPct(db);
+      h += '<div class="card" id="absence-card"><div class="card-head"><div><h3>Όριο απουσιών</h3><div class="sub">Ισχύει για κάθε μάθημα — ημέρες από το «Ημερολόγιο & απουσίες»</div></div><button class="btn btn-sm btn-primary" data-action="saveAbsencePct">' + icon('save') + 'Αποθήκευση</button></div><div class="card-body">' +
+        '<div class="row"><input class="input" id="abs-pct" type="number" min="0" max="100" step="1" value="' + pct + '" style="width:90px" /><span>% των ημερών του μαθήματος στο ημερολόγιο του τμήματος</span></div>' +
+        '<p class="small muted" style="margin:12px 0 0;line-height:1.55">Μετράνε όλες οι απουσίες. Το όριο στρογγυλεύεται προς τα κάτω: με ' + pct + '% και 20 ημέρες μαθήματος επιτρέπονται έως <b>' + C.absenceLimit(20, pct) + '</b> απουσίες. ' +
+        'Με περισσότερες ο σπουδαστής <b>δεν μπορεί να ξεκινήσει</b> τις εξετάσεις του μαθήματος (βλέπει μήνυμα στην οθόνη του), εκτός αν του δώσετε άδεια στη συγκεκριμένη εξέταση (Εξετάσεις → Αποτελέσματα).</p></div></div>';
+
       // server & backups
       const info = S.info || {};
       h += '<div class="card"><div class="card-head"><div><h3>Διακομιστής & αντίγραφα ασφαλείας</h3><div class="sub">Όλα τα δεδομένα βρίσκονται στον κεντρικό διακομιστή της ακαδημίας</div></div></div><div class="card-body">';
@@ -906,6 +916,12 @@
     toast('<b>' + esc(lname) + '</b>: ' + esc(now.length ? now.map((p) => p.name).join(', ') : 'χωρίς περιόδους'));
   };
 
+  App.actions.saveAbsencePct = () => {
+    const v = document.getElementById('abs-pct').value;
+    const r = tryMutate((db) => C.setAbsenceLimitPct(db, v));
+    if (r.ok) toast('Όριο απουσιών: <b>' + r.value + '%</b> των ημερών κάθε μαθήματος');
+  };
+
   App.actions.saveLevelNames = () => {
     const names = {};
     document.querySelectorAll('[data-level-name]').forEach((inp) => {
@@ -1028,6 +1044,7 @@
       if (App.student && App.student.stop) App.student.stop();
       if (App.teacher && App.teacher.stop) App.teacher.stop();
       if (App.exams && App.exams.reset) App.exams.reset();
+      if (App.calendar && App.calendar.reset) App.calendar.reset();
       if (App.accounts && App.accounts.reset) App.accounts.reset();
       App.ui.closeAllModals();
       await Remote.logout();

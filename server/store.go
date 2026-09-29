@@ -68,6 +68,8 @@ type Exam struct {
 	CreatedBy   string       `json:"createdBy"`
 	Questions   []Question   `json:"questions"`
 	Assignments []Assignment `json:"assignments"`
+	// students over the absence limit of the subject whom the admin allowed to take this exam (by Α.Μ.)
+	AbsenceAllowed map[string]AbsenceAllow `json:"absenceAllowed,omitempty"`
 }
 
 type Attempt struct {

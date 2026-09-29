@@ -1,0 +1,97 @@
+/* Calendar & absences: class calendar (one subject per day), absence summary, over-the-limit marks in exams,
+   the «Απουσίες» tab of the teacher portal and the "not eligible" card of the student portal. */
+
+/* ---------------------------------------------------------------- subject colours (per class, in subject order) */
+.cs-0 { background: #e5eefa; color: #1e5fa6; }
+.cs-1 { background: #fbece3; color: #b4521d; }
+.cs-2 { background: #e3f4e9; color: #1b7f4b; }
+.cs-3 { background: #efe8fb; color: #6a3fb5; }
+.cs-4 { background: #def3f3; color: #0f7070; }
+.cs-5 { background: #fbe7f0; color: #b1306e; }
+.cs-6 { background: #f1ebe2; color: #7a5b33; }
+.cs-7 { background: #eef3dd; color: #5f7414; }
+.cs-8 { background: #e6e8fb; color: #3b44a8; }
+.cs-9 { background: #fdf3e2; color: #a8690f; }
+.cs-x { background: #eef1f5; color: var(--muted); }
+
+/* ---------------------------------------------------------------- page bar */
+.cal-bar { margin-bottom: 14px; gap: 10px; }
+.cal-cls { width: auto; min-width: 280px; max-width: 460px; }
+.cal-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 1180px) { .cal-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------- month grid */
+.cal-card { overflow: hidden; }
+.cal-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.cal-month { font-size: 15px; font-weight: 700; min-width: 160px; text-align: center; }
+.cal-hint { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-wd { padding: 7px 10px; font-size: 11px; font-weight: 650; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.cal-wd.wkend { color: var(--faint); }
+.cal-day { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-height: 84px; padding: 6px 7px 7px; border: 0; border-right: 1px solid #edf0f4; border-bottom: 1px solid #edf0f4; background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.cal-grid > :nth-child(7n) { border-right: 0; }
+button.cal-day:hover { background: #f6f9fd; box-shadow: inset 0 0 0 2px var(--primary-line); }
+button.cal-day:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary); }
+.cal-day.wkend { background: #fafbfc; }
+.cal-day.out { background: #f6f7f9; color: var(--faint); cursor: default; }
+.cal-dnum { align-self: flex-start; min-width: 22px; padding: 1px 6px; border-radius: 99px; font-size: 12px; font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
+.cal-day.today .cal-dnum { background: var(--primary); color: #fff; }
+.cal-subj { display: block; padding: 3px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-abs { font-size: 11px; font-weight: 650; color: var(--danger); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------------------------------------------------------------- legend */
+.cal-leg-list { padding: 6px 0; }
+.cal-leg { display: flex; align-items: center; gap: 10px; padding: 7px 16px; }
+.cal-leg.none { opacity: 0.6; }
+.cal-sw { flex: none; width: 12px; height: 12px; border-radius: 4px; }
+.cal-leg-main { flex: 1; min-width: 0; }
+.cal-leg-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-leg-meta { font-size: 11.5px; color: var(--muted); }
+.cal-over { flex: none; border: 1px solid #f0c9c9; background: var(--danger-soft); color: var(--danger); border-radius: 99px; padding: 2px 8px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.cal-over:hover { border-color: var(--danger); }
+.cal-leg-foot { border-top: 1px solid var(--border); line-height: 1.55; }
+
+/* ---------------------------------------------------------------- fill dialog, day dialog */
+.cf-days { gap: 6px 14px; }
+.cd-wrap { max-height: 46vh; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.cd-wrap td.num .badge { margin-left: 4px; }
+
+/* ---------------------------------------------------------------- absence summary */
+.abs-wrap { max-height: calc(100vh - 290px); }
+.abs-table th { vertical-align: bottom; }
+.abs-th-sub { font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--faint); white-space: nowrap; }
+.abs-cell { min-width: 44px; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 2px 7px; font: inherit; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; color: var(--text); }
+.abs-cell:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.abs-cell.zero { color: var(--faint); font-weight: 500; cursor: default; }
+.abs-cell.zero:hover { border-color: transparent; background: transparent; }
+.abs-cell.at { color: var(--warning); background: var(--warning-soft); }
+.abs-cell.over { color: var(--danger); background: var(--danger-soft); border-color: #f0c9c9; }
+.abs-of { color: var(--faint); font-weight: 500; margin-left: 1px; }
+.abs-cell.over .abs-of, .abs-cell.at .abs-of { color: inherit; opacity: 0.7; }
+.abs-over-row td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.abs-foot { border-top: 1px solid var(--border); line-height: 1.55; }
+
+/* ---------------------------------------------------------------- exams (admin): absences column */
+.ex-abs { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ex-abs.over { color: var(--danger); font-weight: 700; }
+.ex-abs .badge { margin-left: 4px; }
+.ex-allow { margin-left: 4px; }
+
+/* ---------------------------------------------------------------- student portal: not eligible because of absences */
+.exam-card.barred { border-color: #f0c9c9; }
+.exam-card.barred .ec-date { background: var(--danger-soft); border-color: #f0c9c9; }
+.exam-card.barred .ec-date .d { color: var(--danger); }
+.ec-barred { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--danger-soft); border: 1px solid #f0c9c9; color: #8f2a2a; font-size: 12.8px; line-height: 1.5; }
+.ec-barred svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--danger); }
+
+/* ---------------------------------------------------------------- teacher portal: Βαθμοί | Απουσίες */
+.tp-tabs { margin-right: 4px; }
+.tp-abs-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 18px; border-bottom: 1px solid var(--border); }
+.tp-abs-date { width: auto; min-width: 240px; }
+.tp-abs-table td.chk { width: 44px; }
+.tp-abs-table tr.absent td { background: #fff6f6; }
+.tp-abs-table input[type='checkbox'] { width: 17px; height: 17px; accent-color: var(--danger); cursor: pointer; }
+.tp-abs-n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tp-abs-n.over { color: var(--danger); font-weight: 700; }
+.tp-abs-n.at { color: var(--warning); font-weight: 650; }
+.tp-abs-table tr.saving td { opacity: 0.6; }
