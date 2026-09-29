@@ -1,6 +1,6 @@
 /*
- * Student portal (always in English): the student sees ONLY his exams (schedule, taking, "submitted")
- * and the syllabus (PDF files) of his subjects.
+ * Student portal (always in English): the student sees ONLY his exams (schedule, taking, "submitted"),
+ * the syllabus (PDF files) of his subjects and his own absences (hours per subject and day — no limits).
  * No grades, no scores, no registry data ever reach this screen — the server does not send them.
  */
 (function () {
@@ -13,10 +13,11 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  // view: 'list' (exams) | 'exam' (taking one) | 'done' (just submitted) | 'syllabus'
+  // view: 'list' (exams) | 'exam' (taking one) | 'done' (just submitted) | 'syllabus' | 'absences'
   const P = {
     view: 'list', list: [], x: null, answers: {}, cur: 0, dirty: false, saving: null, saveState: 'saved', timers: [], done: null, wired: false, loading: false,
     sy: null, syError: '', syLoading: false, opening: null,
+    ab: null, abError: '', abLoading: false,
   };
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -90,11 +91,12 @@
   // ------------------------------------------------------------ top bar + tabs
   function tabsHtml() {
     if (P.view === 'exam') return ''; // no syllabus while taking an exam
-    const on = P.view === 'syllabus' ? 'syllabus' : 'exams';
+    const on = P.view === 'syllabus' || P.view === 'absences' ? P.view : 'exams';
     const nOpen = P.list.filter((e) => (e.state === 'open' || e.state === 'in_progress') && !e.barred).length;
     return '<nav class="sp-tabs" id="sp-tabs">' +
       '<button class="sp-tab' + (on === 'exams' ? ' on' : '') + '" id="sp-tab-exams" data-sx="tab" data-tab="exams">' + icon('clipboard', 'width="16" height="16"') + 'Exams' + (nOpen ? '<span class="count" title="Available now">' + nOpen + '</span>' : '') + '</button>' +
-      '<button class="sp-tab' + (on === 'syllabus' ? ' on' : '') + '" id="sp-tab-syllabus" data-sx="tab" data-tab="syllabus">' + icon('book', 'width="16" height="16"') + 'Syllabus</button></nav>';
+      '<button class="sp-tab' + (on === 'syllabus' ? ' on' : '') + '" id="sp-tab-syllabus" data-sx="tab" data-tab="syllabus">' + icon('book', 'width="16" height="16"') + 'Syllabus</button>' +
+      '<button class="sp-tab' + (on === 'absences' ? ' on' : '') + '" id="sp-tab-absences" data-sx="tab" data-tab="absences">' + icon('calendar', 'width="16" height="16"') + 'Absences</button></nav>';
   }
 
   function topBar() {
@@ -169,7 +171,7 @@
       const r = await Remote.myExams();
       P.list = r.exams || [];
       if (P.view === 'list') root().innerHTML = listHtml();
-      else if (P.view === 'syllabus' || P.view === 'done') paintTabs();
+      else if (P.view === 'syllabus' || P.view === 'absences' || P.view === 'done') paintTabs();
     } catch (e) {
       if (!silent) toast(esc(e.message), 'error');
     } finally {
@@ -261,6 +263,56 @@
       P.opening = null;
       paintSyllabus();
     }
+  }
+
+  // ------------------------------------------------------------ absences (his own: hours per subject and day)
+  function absencesHtml() {
+    const d = P.ab;
+    let h = topBar() + '<div class="sp-body"><h2>Absences</h2><div class="muted">Your hours of absence' + (d && d.year ? ' in <b>' + esc(d.year) + '</b>' : '') + ', per subject and day.</div>';
+    if (!d) {
+      if (P.abError)
+        h += '<div class="exam-cards"><div class="card card-pad center" style="padding:36px">' + icon('alert', 'width="28" height="28" class="danger-text"') +
+          '<p>Your absences could not be loaded.<br><span class="small muted">' + esc(P.abError) + '</span></p><button class="btn" data-sx="abreload">' + icon('refresh') + 'Try again</button></div></div>';
+      else h += '<div class="exam-cards"><div class="card card-pad center muted" style="padding:40px">Loading…</div></div>';
+      return h + '</div>';
+    }
+    const subs = d.subjects || [];
+    if (!subs.length) return h + '<div class="exam-cards"><div class="card card-pad center muted" style="padding:40px" id="ab-none">' + icon('check', 'width="28" height="28"') + '<p>You have no absences.</p></div></div></div>';
+    h += '<div class="ab-total" id="ab-total">Total: <b>' + plural(d.total || 0, 'hour', 'hours') + '</b></div><div class="sy-list">';
+    subs.forEach((s) => {
+      h += '<div class="sy-subj has-files ab-subj" data-subject="' + esc(s.id) + '"><div class="sy-head"><span class="sy-ic">' + icon('book') + '</span>' +
+        '<div class="sy-name">' + esc(s.name) + (s.code ? '<span class="sy-code">' + esc(s.code) + '</span>' : '') + '</div><span class="ab-n">' + plural(s.hours, 'hour', 'hours') + '</span></div><div class="ab-days">' +
+        (s.days || []).map((x) => '<div class="ab-day"><span>' + esc(dateLong(x.date + 'T12:00:00')) + '</span><span class="ab-hours">' + (x.hours.length === 1 ? 'hour ' : 'hours ') + x.hours.join(', ') + '</span></div>').join('') +
+        '</div></div>';
+    });
+    return h + '</div></div>';
+  }
+
+  function paintAbsences() {
+    if (P.view === 'absences') root().innerHTML = absencesHtml();
+  }
+
+  async function loadAbsences(silent) {
+    if (P.abLoading) return;
+    P.abLoading = true;
+    try {
+      P.ab = await Remote.myAbsences();
+      P.abError = '';
+    } catch (e) {
+      if (!P.ab) P.abError = e.message;
+      else if (!silent) toast(esc(e.message), 'error');
+    } finally {
+      P.abLoading = false;
+    }
+    paintAbsences();
+  }
+
+  function showAbsences() {
+    P.view = 'absences';
+    P.abError = '';
+    paintAbsences();
+    root().scrollTop = 0;
+    return loadAbsences(true);
   }
 
   // ------------------------------------------------------------ taking an exam
@@ -455,6 +507,7 @@
       if (a === 'tab') {
         if (P.view === 'exam') return;
         if (b.dataset.tab === 'syllabus') return showSyllabus();
+        if (b.dataset.tab === 'absences') return showAbsences();
         P.view = 'list';
         root().innerHTML = listHtml();
         root().scrollTop = 0;
@@ -464,6 +517,11 @@
         P.syError = '';
         paintSyllabus();
         return loadSyllabus();
+      }
+      if (a === 'abreload') {
+        P.abError = '';
+        paintAbsences();
+        return loadAbsences();
       }
       if (a === 'pdf') return openPdf(b.dataset.id, b.dataset.subject);
       if (a === 'back') {
@@ -538,13 +596,16 @@
     P.sy = null;
     P.syError = '';
     P.opening = null;
+    P.ab = null;
+    P.abError = '';
     root().innerHTML = topBar() + '<div class="sp-body"><div class="muted">Loading…</div></div>';
     await loadList();
     P.timers.forEach(clearInterval);
     P.timers = [
       setInterval(tick, 250),
       setInterval(() => {
-        if (P.view === 'list' || P.view === 'syllabus') loadList(true);
+        if (P.view === 'list' || P.view === 'syllabus' || P.view === 'absences') loadList(true);
+        if (P.view === 'absences') loadAbsences(true);
       }, 20000),
     ];
   };
@@ -560,6 +621,8 @@
       P.list = [];
       P.sy = null; // nothing of this student stays for the next one on a shared PC
       P.syError = '';
+      P.ab = null;
+      P.abError = '';
       P.opening = null;
       const r = root();
       if (r) r.innerHTML = '';

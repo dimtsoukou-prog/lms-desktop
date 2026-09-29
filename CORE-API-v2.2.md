@@ -81,9 +81,11 @@ Syllabus entry: `{id, subjectId, name, size, uploadedAt, by, byName, byRole}`.
 
 ## Pages
 - `p-calendar.js` — «Ημερολόγιο & απουσίες» (admin): month grid per class, day dialog (subject + hour toggles per student), «Συμπλήρωση ημερών»,
-  «Αντιγραφή από τμήμα», «Απουσίες» summary in hours (click a number: the days and hours, delete one). Settings: «Απουσίες» card (hours per day).
+  «Αντιγραφή από τμήμα», «Απουσίες» summary in hours (click a number: the days and hours, delete one; «Όλοι | Μόνο εκτός ορίου» filter,
+  opened already filtered from «εκτός ορίου» in the legend). The month grid shows only each day's subject. Settings: «Απουσίες» card (hours per day).
 - `p-subjects.js` — «Όριο απουσιών (ώρες)» in the subject form and table.
 - `p-exams.js` — «Απουσίες» column + «Να γράψει» / «Ανάκληση άδειας» in the results and in the assignment list (`Remote.allowAbsence(id, am, on)`).
 - `p-teacher.js` — «Βαθμοί | Απουσίες»: one day at a time, hour toggles per student (+ «όλες»), saved at once (`Remote.teacherAbsences(payload)`), hours / limit per student.
-- `p-student.js` — a barred exam: "Not eligible" card with the absences and the limit, no Start button.
+- `p-student.js` — a barred exam: "Not eligible" card with the absences and the limit, no Start button; **Absences** tab
+  (`Remote.myAbsences()` → per subject the dates and hours, and the total; no limits).
 - `p-students.js` — student card tab «Απουσίες» (per year and subject).

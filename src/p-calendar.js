@@ -14,7 +14,8 @@
   const Remote = window.Remote;
   const S = () => App.S;
 
-  const Z = { yearId: null, cls: null, month: null, view: 'month' };
+  // onlyOver: null = every student in «Απουσίες», 'any' = only those over a limit, a subject id = only those over its limit
+  const Z = { yearId: null, cls: null, month: null, view: 'month', onlyOver: null };
   const MONTHS = ['Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
   const MONTHS_GEN = ['Ιανουαρίου', 'Φεβρουαρίου', 'Μαρτίου', 'Απριλίου', 'Μαΐου', 'Ιουνίου', 'Ιουλίου', 'Αυγούστου', 'Σεπτεμβρίου', 'Οκτωβρίου', 'Νοεμβρίου', 'Δεκεμβρίου'];
   const DAYS = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
@@ -92,12 +93,6 @@
     const subjects = C.calendarSubjects(db, yearId, c.key);
     const col = colours(subjects);
     const byId = new Map(db.subjects.map((s) => [s.id, s]));
-    const ids = new Set(c.students.map((s) => s.id));
-    const perDay = new Map(); // date → hours of absence of the class's students
-    A.abs.byDay.forEach((hours, k) => {
-      const i = k.lastIndexOf('|');
-      if (ids.has(k.slice(0, i))) perDay.set(k.slice(i + 1), (perDay.get(k.slice(i + 1)) || 0) + hours.length);
-    });
     const range = C.yearDateRange(db, yearId);
     const t = today();
     const [yy, mm] = Z.month.split('-').map(Number);
@@ -123,11 +118,10 @@
       }
       const sid = A.cal.day.get(c.key + '|' + d) || null;
       const sj = sid ? byId.get(sid) : null;
-      const absent = sid ? perDay.get(d) || 0 : 0;
       h += '<button class="' + cls + (sj ? ' has' : '') + '" data-action="calDay" data-date="' + d + '" title="' + esc(longDate(d) + (sj ? ' — ' + C.subjectLabel(sj) : '')) + '">' +
         '<span class="cal-dnum">' + Number(d.slice(8, 10)) + '</span>' +
         (sj ? '<span class="cal-subj cs-' + (col.has(sid) ? col.get(sid) : 0) + '">' + esc(subjectShort(sj)) + '</span>' : sid ? '<span class="cal-subj cs-x">?</span>' : '') +
-        (absent ? '<span class="cal-abs">' + plural(absent, 'ώρα απουσίας', 'ώρες απουσίας') + '</span>' : '') + '</button>';
+        '</button>';
     });
     return h + '</div></div>';
   }
@@ -147,7 +141,7 @@
       const over = limit === null ? 0 : c.students.filter((st) => (A.abs.bySubject.get(st.id + '|' + s.id) || []).length > limit).length;
       h += '<div class="cal-leg' + (days ? '' : ' none') + '"><span class="cal-sw cs-' + col.get(s.id) + '"></span><div class="cal-leg-main"><div class="cal-leg-name" title="' + esc(C.subjectLabel(s)) + '">' + esc(C.subjectLabel(s)) + '</div>' +
         '<div class="cal-leg-meta">' + (days ? plural(days, 'ημέρα', 'ημέρες') : 'χωρίς ημέρες') + ' · ' + (limit === null ? '<span class="warning-text">χωρίς όριο</span>' : 'όριο <b>' + plural(limit, 'ώρα', 'ώρες') + '</b>') + '</div></div>' +
-        (over ? '<button class="cal-over" data-action="calView" data-v="summary" title="Σπουδαστές πάνω από το όριο">' + over + ' εκτός ορίου</button>' : '') + '</div>';
+        (over ? '<button class="cal-over" data-action="calOver" data-subject="' + esc(s.id) + '" title="Μόνο οι σπουδαστές πάνω από το όριο του μαθήματος">' + over + ' εκτός ορίου</button>' : '') + '</div>';
     });
     if (!subjects.length) h += '<div class="card-body small muted">Το επίπεδο δεν έχει μαθήματα για αυτό το τμήμα — προσθέστε τα στη σελίδα «Μαθήματα».</div>';
     h += '</div><div class="card-body cal-leg-foot small muted">Σύνολο: <b>' + plural(total, 'ημέρα', 'ημέρες') + '</b> με μάθημα, ' + plural(A.hpd, 'ώρα', 'ώρες') + ' η καθεμία. ' +
@@ -161,12 +155,19 @@
     const sum = C.absenceSummary(db, yearId, c.key);
     if (!sum.subjects.length) return '<div class="card">' + emptyState('calendar', 'Δεν υπάρχει ακόμη ημερολόγιο', 'Ορίστε πρώτα τις ημέρες κάθε μαθήματος του τμήματος (καρτέλα «Ημερολόγιο») — από αυτές βγαίνει το όριο απουσιών.', '<button class="btn btn-primary" data-action="calView" data-v="month">' + icon('calendar') + 'Ημερολόγιο</button>') + '</div>';
     const over = sum.rows.filter((r) => r.over).length;
+    // «εκτός ορίου»: only the students over a limit (of one subject, when chosen from the subject list)
+    const fi = Z.onlyOver && Z.onlyOver !== 'any' ? sum.subjects.findIndex((x) => x.subject.id === Z.onlyOver) : -1;
+    const fs = fi >= 0 ? sum.subjects[fi].subject : null;
+    const rows = !Z.onlyOver ? sum.rows : sum.rows.filter((r) => (fs ? r.cells[fi].over : r.over));
     let h = '<div class="card"><div class="card-head"><div><h3>Ώρες απουσίας ανά μάθημα</h3><div class="sub">' + plural(sum.rows.length, 'σπουδαστής', 'σπουδαστές') + ' · όριο κάθε μαθήματος σε ώρες (Μαθήματα)' +
-      (over ? ' · <span class="danger-text strong">' + plural(over, 'σπουδαστής', 'σπουδαστές') + ' εκτός ορίου</span>' : '') + '</div></div></div>';
+      (over ? ' · <span class="danger-text strong">' + plural(over, 'σπουδαστής', 'σπουδαστές') + ' εκτός ορίου</span>' : '') + '</div></div>' +
+      '<div class="row">' + (fs ? '<span class="badge badge-danger" id="abs-filter-subject">' + esc(subjectShort(fs)) + '</span>' : '') +
+      '<div class="seg" id="abs-filter"><button class="' + (Z.onlyOver ? '' : 'on') + '" data-action="calOverFilter" data-v="">Όλοι</button><button class="' + (Z.onlyOver ? 'on' : '') + '" data-action="calOverFilter" data-v="any">Μόνο εκτός ορίου (' + (fs ? rows.length : over) + ')</button></div></div></div>';
+    if (Z.onlyOver && !rows.length) return h + '<div class="card-body">' + emptyState('check', 'Κανείς εκτός ορίου', fs ? 'Κανένας σπουδαστής δεν έχει περισσότερες ώρες απουσίας από το όριο στο ' + esc(C.subjectLabel(fs)) + '.' : 'Κανένας σπουδαστής του τμήματος δεν έχει περισσότερες ώρες απουσίας από το όριο.') + '</div></div>';
     h += '<div class="table-wrap abs-wrap"><table class="table table-compact abs-table"><thead><tr><th>Α.Μ.</th><th>Ονοματεπώνυμο</th>' +
       sum.subjects.map((x) => '<th class="num" title="' + esc(C.subjectLabel(x.subject)) + '"><div>' + esc(subjectShort(x.subject)) + '</div><div class="abs-th-sub">' + x.days + ' ημ. · ' + (x.limit === null ? 'χωρίς όριο' : 'όριο ' + x.limit + ' ώρ.') + '</div></th>').join('') +
       '<th class="num">Σύνολο</th></tr></thead><tbody>';
-    sum.rows.forEach((r) => {
+    rows.forEach((r) => {
       h += '<tr' + (r.over ? ' class="abs-over-row"' : '') + '><td class="am">' + esc(r.student.am) + '</td><td class="strong nowrap">' + esc(C.studentName(r.student)) + (r.withdrawn ? ' <span class="badge">αποχώρησε</span>' : '') + '</td>' +
         r.cells.map((cell, i) => {
           const x = sum.subjects[i];
@@ -207,10 +208,22 @@
 
   App.changes.calCls = (el) => {
     Z.cls = el.value;
+    Z.onlyOver = null;
     App.render();
   };
   App.actions.calView = (el) => {
     Z.view = el.dataset.v === 'summary' ? 'summary' : 'month';
+    Z.onlyOver = null;
+    App.render();
+  };
+  /** «N εκτός ορίου» of a subject → «Απουσίες» with only the students over its limit. */
+  App.actions.calOver = (el) => {
+    Z.view = 'summary';
+    Z.onlyOver = el.dataset.subject || 'any';
+    App.render();
+  };
+  App.actions.calOverFilter = (el) => {
+    Z.onlyOver = el.dataset.v || null;
     App.render();
   };
   App.actions.calMonth = (el) => {
@@ -486,7 +499,7 @@
   App.calendar = {
     state: Z,
     reset() {
-      Object.assign(Z, { yearId: null, cls: null, month: null, view: 'month' });
+      Object.assign(Z, { yearId: null, cls: null, month: null, view: 'month', onlyOver: null });
     },
     longDate,
     shortDate,

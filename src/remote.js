@@ -276,6 +276,8 @@
     deleteSyllabus: (id) => request('DELETE', '/api/syllabus/files/' + encodeURIComponent(id)),
     /** student: → {level:{id, name}, subjects:[{id, code, name, files:[{id, name, size, uploadedAt}]}]} */
     mySyllabus: () => request('GET', '/api/my/syllabus'),
+    /** student: → {year, total, subjects:[{id, code, name, hours, days:[{date, hours:[1…]}]}]} — his own absences only */
+    myAbsences: () => request('GET', '/api/my/absences'),
     /** student: → Uint8Array (the PDF) */
     mySyllabusFile: (id) => requestBinary('GET', '/api/my/syllabus/files/' + encodeURIComponent(id), { timeout: 300000 }),
   });

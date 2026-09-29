@@ -122,6 +122,7 @@ Server (`server/attendance.go`, the twin of the Core functions; `test/attendance
 |---|---|---|
 | `POST /api/teacher/absences` | teacher | `{yearId, subjectId, date, changes:[{studentId, hour, absent}]}` → `{rev, stats:{added, removed, same}}`. The subject must be his (any assignment of that year), the student in his classes, the student's class must have that subject that day, `hour` 1…hoursPerDay, the date not after tomorrow. No change → no new revision. |
 | `POST /api/exams/{id}/absence-allow` | admin | `{am, allowed}` → `{absenceAllowed:{am:{by, at}}}` — the student may take **this** exam although over the limit. |
+| `GET /api/my/absences` | student | `{year:{id, name}\|null, subjects:[{id, code, name, hours, days:[{date, hours:[1,2…]}]}], total}` — his hours of absence in the current year (else the latest year he is enrolled in); only subjects with absences, no limits. |
 
 - Exam file: `absenceAllowed: {am: {by, at}}` (kept only for students still assigned; a duplicated exam starts without it).
 - An exam with `subjectId` and `yearId` is checked: `GET /api/my/exams` gives a not-started exam `barred: true, absences (hours), absenceLimit`
@@ -131,3 +132,5 @@ Server (`server/attendance.go`, the twin of the Core functions; `test/attendance
   `GET /api/exams/{id}` includes `absenceAllowed`.
 - Teacher view (`GET /api/teacher/data`): `calendar` = the days of his subjects in his students' classes, `absences` = his students'
   absences in his subjects, `settings.hoursPerDay`; his subjects carry `absenceLimit`.
+- UI: the admin month grid shows only the subject of each day (no hour counts); «εκτός ορίου» in the legend opens the summary
+  filtered to the students over the limit («Όλοι | Μόνο εκτός ορίου»). The student portal has an **Absences** tab (dates and hours only).

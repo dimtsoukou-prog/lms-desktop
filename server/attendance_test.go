@@ -246,3 +246,24 @@ func TestExamAbsenceGate(t *testing.T) {
 		t.Errorf("prune: %v", e.AbsenceAllowed)
 	}
 }
+
+func TestMyAbsences(t *testing.T) {
+	d := mustParse(t, strings.Replace(attendanceRegistry, `"absences": [{`, `"absences": [{"studentId": "s2", "yearId": "y1", "date": "2026-10-06", "hour": 4, "subjectId": "eng"}, {"studentId": "s2", "yearId": "y1", "date": "2026-10-05", "hour": 1, "subjectId": "nav"}, {"studentId": "s2", "yearId": "y1", "date": "2026-10-07", "subjectId": "nav"}, {"studentId": "s1", "yearId": "y1", "date": "2026-10-05", "hour": 3, "subjectId": "nav"}, {`, 1))
+	b, _ := json.Marshal(d.myAbsences("101"))
+	// same subject order → by name; a record without an hour is not counted
+	want := `{"subjects":[{"code":"ENG","days":[{"date":"2026-10-06","hours":[4]}],"hours":1,"id":"eng","name":"Αγγλικά"},{"code":"NAV","days":[{"date":"2026-10-05","hours":[1,2]}],"hours":2,"id":"nav","name":"Ναυσιπλοΐα"}],"total":3,"year":"2026-2027"}`
+	if string(b) != want {
+		t.Errorf("myAbsences(101)\n got %s\nwant %s", b, want)
+	}
+	if strings.Contains(string(b), "imit") {
+		t.Error("a student never gets the limits")
+	}
+	b, _ = json.Marshal(d.myAbsences("102"))
+	if string(b) != `{"subjects":[],"total":0,"year":"2026-2027"}` {
+		t.Errorf("no absences: %s", b)
+	}
+	b, _ = json.Marshal(d.myAbsences("999"))
+	if string(b) != `{"subjects":[],"total":0,"year":null}` {
+		t.Errorf("unknown: %s", b)
+	}
+}

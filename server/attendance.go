@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -423,6 +425,18 @@ func (s *Server) attendanceRoutes(mux *http.ServeMux) {
 		return map[string]any{"rev": r.Rev, "stats": stats}, nil
 	})
 
+	// the student's own absences (English portal): hours per subject and day — never limits or grades
+	s.route(mux, "GET /api/my/absences", "student", 0, func(c *reqCtx) (any, error) {
+		if st.registry == nil {
+			return map[string]any{"year": nil, "subjects": []any{}, "total": 0}, nil
+		}
+		d, err := parseRegistry(st.registry.Data)
+		if err != nil {
+			return nil, err
+		}
+		return d.myAbsences(normAm(c.user.AM)), nil
+	})
+
 	// the admin lets a student over the absence limit take one exam (or takes it back)
 	s.route(mux, "POST /api/exams/{id}/absence-allow", "admin", 0, func(c *reqCtx) (any, error) {
 		e, err := s.exam(c.param("id"))
@@ -456,6 +470,100 @@ func (s *Server) attendanceRoutes(mux *http.ServeMux) {
 		st.addAudit(c.user.Username, action, e.Title+" / "+am)
 		return map[string]any{"absenceAllowed": allowedMap(e)}, nil
 	})
+}
+
+// myAbsences: the student's (by Α.Μ.) hours of absence in the academic year of his current enrollment
+// (settings.currentYearId, else his latest one), per subject in subject order — absences only, no limits.
+func (d *regDoc) myAbsences(am string) map[string]any {
+	out := map[string]any{"year": nil, "subjects": []any{}, "total": 0}
+	var stu *regStudent
+	for i := range d.students {
+		if am != "" && normAm(d.students[i].AM) == am {
+			stu = &d.students[i]
+			break
+		}
+	}
+	if stu == nil {
+		return out
+	}
+	cur, _ := d.settings["currentYearId"].(string)
+	yearID, best := "", -1
+	for _, e := range d.enrollments {
+		if e.StudentID != stu.ID {
+			continue
+		}
+		if cur != "" && e.YearID == cur {
+			yearID = cur
+			break
+		}
+		start := 0
+		if y := d.year(e.YearID); y != nil {
+			start = yearStart(y.Label)
+		}
+		if start >= best {
+			yearID, best = e.YearID, start
+		}
+	}
+	if yearID == "" {
+		return out
+	}
+	if y := d.year(yearID); y != nil {
+		out["year"] = y.Label
+	}
+	var list []regAbsence
+	if raw, ok := d.top["absences"]; ok {
+		json.Unmarshal(raw, &list)
+	}
+	hours := map[string]map[string][]int{} // subjectId → date → hours
+	seen := map[string]bool{}
+	total := 0
+	for _, a := range list {
+		if a.StudentID != stu.ID || a.YearID != yearID || !validHour(a.Hour) || a.SubjectID == "" || d.subject(a.SubjectID) == nil {
+			continue
+		}
+		k := a.Date + "|" + strconv.Itoa(int(a.Hour))
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if hours[a.SubjectID] == nil {
+			hours[a.SubjectID] = map[string][]int{}
+		}
+		hours[a.SubjectID][a.Date] = append(hours[a.SubjectID][a.Date], int(a.Hour))
+		total++
+	}
+	subjects := []regSubject{}
+	for id := range hours {
+		subjects = append(subjects, *d.subject(id))
+	}
+	sort.SliceStable(subjects, func(i, j int) bool {
+		if subjects[i].LevelID != subjects[j].LevelID {
+			return subjects[i].LevelID < subjects[j].LevelID
+		}
+		if subjects[i].Order != subjects[j].Order {
+			return subjects[i].Order < subjects[j].Order
+		}
+		return strings.ToLower(subjects[i].Name) < strings.ToLower(subjects[j].Name)
+	})
+	res := []any{}
+	for _, sj := range subjects {
+		dates := []string{}
+		n := 0
+		for date, hs := range hours[sj.ID] {
+			dates = append(dates, date)
+			n += len(hs)
+		}
+		sort.Strings(dates)
+		days := []any{}
+		for _, date := range dates {
+			hs := hours[sj.ID][date]
+			sort.Ints(hs)
+			days = append(days, map[string]any{"date": date, "hours": hs})
+		}
+		res = append(res, map[string]any{"id": sj.ID, "code": sj.Code, "name": sj.Name, "hours": n, "days": days})
+	}
+	out["subjects"], out["total"] = res, total
+	return out
 }
 
 // pruneAllowed keeps the admin's permissions only for students still assigned to the exam.
